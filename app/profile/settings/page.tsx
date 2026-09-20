@@ -112,6 +112,17 @@ function CardSetupForm({
 export default function ProfileSettingsPage() {
   const router = useRouter()
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [name, setName] = useState("")
+  const [nameInput, setNameInput] = useState("")
+  const [isSavingName, setIsSavingName] = useState(false)
+  const [nameMessage, setNameMessage] = useState("")
+  const [nameError, setNameError] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [isSavingPassword, setIsSavingPassword] = useState(false)
+  const [passwordMessage, setPasswordMessage] = useState("")
+  const [passwordError, setPasswordError] = useState("")
   const [customerExists, setCustomerExists] = useState<boolean | null>(null)
   const [hasSavedCard, setHasSavedCard] = useState(false)
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -176,7 +187,75 @@ export default function ProfileSettingsPage() {
 
   useEffect(() => {
     void loadStripeStatus()
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: profile, error } = await supabase.from("profiles").select("name").eq("user_id", user.id).maybeSingle()
+      if (error) {
+        console.error("[Supabase] Profile name load failed", error)
+        return
+      }
+      const currentName = profile?.name ?? ""
+      setName(currentName)
+      setNameInput(currentName)
+    })()
   }, [])
+
+  const saveName = async () => {
+    setNameError("")
+    setNameMessage("")
+    const trimmed = nameInput.trim()
+    if (!trimmed) {
+      setNameError("กรุณากรอกชื่อ")
+      return
+    }
+
+    setIsSavingName(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("กรุณาเข้าสู่ระบบก่อน")
+
+      const { error } = await supabase.from("profiles").update({ name: trimmed }).eq("user_id", user.id)
+      if (error) throw error
+
+      setName(trimmed)
+      setNameMessage("บันทึกชื่อเรียบร้อยแล้ว")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ไม่สามารถบันทึกชื่อได้ กรุณาลองใหม่"
+      setNameError(message)
+    } finally {
+      setIsSavingName(false)
+    }
+  }
+
+  const savePassword = async () => {
+    setPasswordError("")
+    setPasswordMessage("")
+
+    if (newPassword.length < 6) {
+      setPasswordError("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
+      return
+    }
+
+    setIsSavingPassword(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+
+      setPasswordMessage("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว")
+      setNewPassword("")
+      setConfirmPassword("")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ไม่สามารถเปลี่ยนรหัสผ่านได้ กรุณาลองใหม่"
+      setPasswordError(message)
+    } finally {
+      setIsSavingPassword(false)
+    }
+  }
 
   const openCardForm = async () => {
     setErrorMessage("")
@@ -258,9 +337,77 @@ export default function ProfileSettingsPage() {
 
       <div className="mx-auto max-w-4xl px-6 py-16">
         <h1 className="text-2xl font-bold">การตั้งค่า</h1>
-        <p className="mt-2 text-sm text-gray-600">การชำระเงิน / เปลี่ยนบัตรสำหรับบัญชี GO</p>
+        <p className="mt-2 text-sm text-gray-600">บัญชี / การชำระเงิน สำหรับบัญชี GO</p>
 
         <div className="mt-8 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-semibold text-gray-900">เปลี่ยนชื่อ</div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(event) => setNameInput(event.target.value)}
+              placeholder="ชื่อของคุณ"
+              className="flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 focus:border-[#121212] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void saveName()}
+              disabled={isSavingName || nameInput.trim() === name}
+              className="rounded-2xl bg-[#121212] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isSavingName ? "กำลังบันทึก..." : "บันทึกชื่อ"}
+            </button>
+          </div>
+          {(nameMessage || nameError) && (
+            <div className={`mt-3 rounded-2xl border px-4 py-2.5 text-sm ${nameError ? "border-red-200 bg-red-50 text-red-700" : "border-green-200 bg-green-50 text-green-700"}`}>
+              {nameError || nameMessage}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-semibold text-gray-900">เปลี่ยนรหัสผ่าน</div>
+          <div className="mt-3 space-y-3">
+            <div className="relative">
+              <input
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)"
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 pr-16 text-sm text-gray-900 focus:border-[#121212] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword((current) => !current)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-500"
+              >
+                {showNewPassword ? "ซ่อน" : "แสดง"}
+              </button>
+            </div>
+            <input
+              type={showNewPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="ยืนยันรหัสผ่านใหม่"
+              className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 focus:border-[#121212] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void savePassword()}
+              disabled={isSavingPassword || !newPassword || !confirmPassword}
+              className="w-full rounded-2xl bg-[#121212] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isSavingPassword ? "กำลังบันทึก..." : "เปลี่ยนรหัสผ่าน"}
+            </button>
+          </div>
+          {(passwordMessage || passwordError) && (
+            <div className={`mt-3 rounded-2xl border px-4 py-2.5 text-sm ${passwordError ? "border-red-200 bg-red-50 text-red-700" : "border-green-200 bg-green-50 text-green-700"}`}>
+              {passwordError || passwordMessage}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
             <div className="rounded-2xl bg-gray-50 p-4">
               <div className="text-xs uppercase tracking-[0.12em] text-gray-500">Stripe Customer</div>
