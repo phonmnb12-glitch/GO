@@ -5,82 +5,90 @@ import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { ArrowLeft, BadgeCheck, CreditCard, ShieldCheck } from "lucide-react"
 import { useState } from "react"
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js"
+import { loadStripe } from "@stripe/stripe-js"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { supabase } from "@/lib/supabase"
 
-function CardBrandIcon({ brand, className }: { brand: string; className?: string }) {
-  const base = `inline-block align-middle ${className ?? ""}`
-  if (brand === "Visa") {
-    return (
-      <svg className={base} width="44" height="16" viewBox="0 0 44 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Visa logo">
-        <rect width="44" height="16" rx="2" fill="#1A56DB" />
-        <text x="6" y="12" fill="white" fontSize="9" fontWeight="700" fontFamily="sans-serif">VISA</text>
-      </svg>
-    )
-  }
+const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+  : null
 
-  if (brand === "Mastercard") {
-    return (
-      <svg className={base} width="36" height="16" viewBox="0 0 36 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Mastercard logo">
-        <circle cx="12" cy="8" r="6" fill="#EB001B" />
-        <circle cx="24" cy="8" r="6" fill="#F79E1B" />
-      </svg>
-    )
-  }
+// Real Stripe.js card capture — tokenizes in Stripe's own iframe, the raw
+// card number/expiry/cvc never touch our own state or backend. Mirrors the
+// same pattern already used in app/profile/settings/page.tsx.
+function CardSetupForm({
+  clientSecret,
+  onSuccess,
+  onError,
+}: {
+  clientSecret: string
+  onSuccess: () => void
+  onError: (message: string) => void
+}) {
+  const stripe = useStripe()
+  const elements = useElements()
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  if (brand === "Amex") {
-    return (
-      <svg className={base} width="44" height="16" viewBox="0 0 44 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Amex logo">
-        <rect width="44" height="16" rx="2" fill="#2E9CCA" />
-        <text x="6" y="12" fill="white" fontSize="7" fontWeight="700" fontFamily="sans-serif">AMEX</text>
-      </svg>
-    )
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!stripe || !elements) {
+      onError("ไม่สามารถเริ่มการเพิ่มบัตรได้ กรุณาลองใหม่")
+      return
+    }
+
+    const cardElement = elements.getElement(CardElement)
+    if (!cardElement) {
+      onError("ไม่พบแบบฟอร์มบัตร กรุณาลองใหม่")
+      return
+    }
+
+    try {
+      setIsSubmitting(true)
+      const { setupIntent, error } = await stripe.confirmCardSetup(clientSecret, {
+        payment_method: { card: cardElement },
+      })
+
+      if (error) throw new Error(error.message || "ไม่สามารถบันทึกบัตรได้ กรุณาลองใหม่")
+      if (setupIntent?.status !== "succeeded") throw new Error("ไม่สามารถบันทึกบัตรได้ กรุณาลองใหม่")
+
+      onSuccess()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ไม่สามารถบันทึกบัตรได้ กรุณาลองใหม่"
+      onError(message)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
-    <svg className={base} width="20" height="14" viewBox="0 0 24 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Card">
-      <rect x="1" y="3" width="22" height="14" rx="2" stroke="#121212" strokeWidth="1.5" fill="#ffffff" />
-      <rect x="3" y="6" width="10" height="2" rx="0.5" fill="#121212" />
-    </svg>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-2xl border border-[#121212]/10 bg-white p-3">
+        <CardElement
+          options={{
+            hidePostalCode: false,
+            style: {
+              base: { fontSize: "16px", color: "#111827", fontFamily: "inherit", iconColor: "#111827" },
+              invalid: { color: "#dc2626" },
+            },
+          }}
+        />
+      </div>
+      <Button
+        type="submit"
+        disabled={isSubmitting}
+        className="h-12 w-full rounded-2xl bg-[#AFFF00] text-base font-bold text-[#121212] shadow-[0_18px_40px_rgba(175,255,0,0.35)] transition hover:bg-[#b6ff2d] disabled:opacity-60"
+      >
+        {isSubmitting ? "กำลังบันทึกบัตร..." : "บันทึกบัตร"}
+      </Button>
+    </form>
   )
-}
-
-function CardBrandDisplay({ brand, variant = "inline" }: { brand: string; variant?: "inline" | "preview" }) {
-  const labelClass = variant === "preview" ? "brand-label" : "brand-label brand-label--light"
-
-  return (
-    <motion.span
-      key={brand}
-      initial={{ scale: 0.95, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.32 }}
-      className="inline-flex items-center gap-2"
-    >
-      <span className="flex items-center justify-center">
-        {brand === "Debit card" ? <CardBrandIcon brand="" className="h-4 w-5" /> : <CardBrandIcon brand={brand} className="h-4 w-8" />}
-      </span>
-      <span className={labelClass}>{brand === "Debit card" ? "Card" : brand}</span>
-    </motion.span>
-  )
-}
-
-const detectCardBrand = (value: string) => {
-  const digits = value.replace(/\s+/g, "")
-
-  if (/^4/.test(digits)) return "Visa"
-  if (/^(5[1-5]|2[2-7])/.test(digits)) return "Mastercard"
-  if (/^3[47]/.test(digits)) return "Amex"
-
-  return "Debit card"
 }
 
 export default function SignupPage() {
-  const [cardNumber, setCardNumber] = useState("")
-  const [cardExpiry, setCardExpiry] = useState("")
-  const [cardCvc, setCardCvc] = useState("")
   const [saveCardConsent, setSaveCardConsent] = useState(true)
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
@@ -89,34 +97,29 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState("")
+  const [cardSecret, setCardSecret] = useState<string | null>(null)
+  const [cardError, setCardError] = useState("")
+  const [pendingName, setPendingName] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
   const [showSuccessPopup, setShowSuccessPopup] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const cardBrand = detectCardBrand(cardNumber)
   const router = useRouter()
 
-  const saveCardForFutureCharges = async (accessToken: string, accountName: string) => {
+  const startCardSetup = async (accessToken: string) => {
     const setupResponse = await fetch("/api/stripe/setup-intent", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({
-        consent: saveCardConsent,
-        name: accountName,
-        email: email.trim(),
-        cardNumber,
-        cardExpiry,
-        cardCvc,
-      }),
+      body: JSON.stringify({ consent: saveCardConsent }),
     })
 
-    const setupResult = await setupResponse.json() as { error?: string; hasSavedCard?: boolean; customerId?: string; paymentMethodId?: string | null }
-    if (!setupResponse.ok) throw new Error(setupResult.error ?? "Unable to save your card.")
-    if (setupResult.hasSavedCard || setupResult.paymentMethodId) return
-
-    return setupResult
+    const setupResult = await setupResponse.json() as { error?: string; hasSavedCard?: boolean; clientSecret?: string | null }
+    if (!setupResponse.ok) throw new Error(setupResult.error ?? "ไม่สามารถเริ่มการเพิ่มบัตรได้")
+    if (setupResult.hasSavedCard) return null
+    if (!setupResult.clientSecret) throw new Error("ไม่สามารถเริ่มการเพิ่มบัตรได้ กรุณาลองใหม่")
+    return setupResult.clientSecret
   }
 
   const handleContinue = async () => {
@@ -142,9 +145,6 @@ export default function SignupPage() {
     if (password.length < 8) nextErrors.password = "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร"
     if (confirmPassword !== password) nextErrors.confirmPassword = "รหัสผ่านไม่ตรงกัน"
     if (!saveCardConsent) nextErrors.saveCardConsent = "กรุณายืนยันว่าบัตรจะถูกบันทึกสำหรับการชาร์จ pledge ในอนาคต"
-    if (cardNumber.replace(/\D/g, "").length < 15) nextErrors.cardNumber = "กรุณากรอกหมายเลขบัตรให้ถูกต้อง"
-    if (!/^\d{1,2}\s*\/\s*\d{2,4}$/.test(cardExpiry)) nextErrors.cardExpiry = "กรุณากรอกวันหมดอายุบัตร"
-    if (cardCvc.replace(/\D/g, "").length < 3) nextErrors.cardCvc = "กรุณากรอก CVV ให้ถูกต้อง"
     setErrors(nextErrors)
     setFormError("")
     setSuccessMessage("")
@@ -188,9 +188,14 @@ export default function SignupPage() {
         }, { onConflict: "user_id" })
         if (profileError) throw profileError
 
-        await saveCardForFutureCharges(data.session.access_token, name)
-        setSuccessMessage(`ยินดีต้อนรับสู่ GO, ${name}`)
-        setShowSuccessPopup(true)
+        const clientSecret = await startCardSetup(data.session.access_token)
+        if (clientSecret) {
+          setPendingName(name)
+          setCardSecret(clientSecret)
+        } else {
+          setSuccessMessage(`ยินดีต้อนรับสู่ GO, ${name}`)
+          setShowSuccessPopup(true)
+        }
       } else {
         setSuccessMessage("กรุณายืนยันอีเมลของคุณก่อน")
         setShowSuccessPopup(true)
@@ -268,15 +273,15 @@ export default function SignupPage() {
 
                   <div className="rounded-2xl border border-[#AFFF00]/20 bg-[#AFFF00]/5 p-4">
                       <div className="flex items-center justify-between text-xs tracking-[0.02em] text-white/60">
-                      <span>เดบิต</span>
-                      <span><CardBrandDisplay brand={cardBrand} variant="preview" /></span>
+                      <span>เดบิต / เครดิต</span>
+                      <CreditCard className="h-4 w-4 text-[#AFFF00]" />
                     </div>
                     <div className="mt-5 text-xl font-semibold tracking-[0.25em] text-white">
-                      {cardNumber ? cardNumber.padEnd(19, "•").slice(0, 19) : "••••  ••••  ••••  ••••"}
+                      ••••  ••••  ••••  ••••
                     </div>
                     <div className="mt-6 flex items-center justify-between text-sm text-white/80">
                       <span>GO MEMBER</span>
-                      <span>12/29</span>
+                      <span>ผูกบัตรผ่าน Stripe อย่างปลอดภัย</span>
                     </div>
                   </div>
                 </motion.div>
@@ -332,68 +337,13 @@ export default function SignupPage() {
                   <div className="space-y-3 rounded-3xl border border-[#121212]/10 bg-[#f8f9f5] p-4">
                     <div className="flex items-center gap-2 text-sm font-semibold text-[#121212]">
                       <CreditCard className="h-4 w-4 text-[#121212]" />
-                      บัตรเดบิต
+                      บัตรเดบิต / เครดิต
                     </div>
+                    <p className="text-xs text-[#121212]/60">
+                      หลังสร้างบัญชี ระบบจะให้คุณกรอกบัตรผ่านแบบฟอร์มที่ปลอดภัยของ Stripe โดยตรง (เราไม่เก็บเลขบัตรของคุณเอง)
+                    </p>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="cardName">ชื่อเจ้าของบัตร</Label>
-                      <Input id="cardName" value={firstName ? `${firstName} ${lastName}`.trim() : ""} readOnly placeholder="ชื่อผู้ถือบัตร" className="h-11 rounded-2xl border-[#121212]/10 bg-white px-4 shadow-none focus-visible:ring-[#AFFF00]" />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="cardNumber">หมายเลขบัตร</Label>
-                      <Input
-                        id="cardNumber"
-                        value={cardNumber}
-                        onChange={(event) => {
-                          const formatted = event.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 16)
-                            .replace(/(\d{4})(?=\d)/g, "$1 ")
-                            .trim()
-
-                          setCardNumber(formatted)
-                        }}
-                        placeholder="1234 5678 9012 3456"
-                        className="h-11 rounded-2xl border-[#121212]/10 bg-white px-4 shadow-none focus-visible:ring-[#AFFF00]"
-                      />
-                      {errors.cardNumber && <p className="text-xs text-red-600">{errors.cardNumber}</p>}
-                      <p className="text-xs text-[#121212]/60 flex items-center gap-2">
-                        <span className="sr-only">Detected card</span>
-                        <span aria-hidden><CardBrandDisplay brand={cardBrand} variant="inline" /></span>
-                      </p>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="expiry">วันหมดอายุ</Label>
-                        <Input
-                          id="expiry"
-                          value={cardExpiry}
-                          onChange={(event) => {
-                            const digits = event.target.value.replace(/\D/g, "").slice(0, 4)
-                            const formatted = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits
-                            setCardExpiry(formatted)
-                          }}
-                          placeholder="MM/YY"
-                          className="h-11 rounded-2xl border-[#121212]/10 bg-white px-4 shadow-none focus-visible:ring-[#AFFF00]"
-                        />
-                        {errors.cardExpiry && <p className="text-xs text-red-600">{errors.cardExpiry}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="cvc">CVV</Label>
-                        <Input
-                          id="cvc"
-                          value={cardCvc}
-                          onChange={(event) => setCardCvc(event.target.value.replace(/\D/g, "").slice(0, 4))}
-                          placeholder="123"
-                          className="h-11 rounded-2xl border-[#121212]/10 bg-white px-4 shadow-none focus-visible:ring-[#AFFF00]"
-                        />
-                        {errors.cardCvc && <p className="text-xs text-red-600">{errors.cardCvc}</p>}
-                      </div>
-                    </div>
-
-                    <label className="mt-4 flex items-start gap-3 rounded-2xl border border-[#121212]/10 bg-white px-3 py-3 text-sm text-[#121212]/75">
+                    <label className="mt-2 flex items-start gap-3 rounded-2xl border border-[#121212]/10 bg-white px-3 py-3 text-sm text-[#121212]/75">
                       <input type="checkbox" checked={saveCardConsent} onChange={(event) => setSaveCardConsent(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-[#121212]/20 text-[#AFFF00] focus:ring-[#AFFF00]" />
                       <span>บันทึกบัตรนี้เพื่อใช้ชำระ pledge GO ในภายหลังโดยไม่ต้องกรอกบัตรอีกครั้ง</span>
                     </label>
@@ -422,6 +372,33 @@ export default function SignupPage() {
           </div>
         </div>
       </div>
+      {cardSecret && stripePromise && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#121212]/40 p-6">
+          <div className="w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl">
+            <div className="flex items-center gap-2 text-lg font-black text-[#121212]">
+              <CreditCard className="h-5 w-5" />
+              เพิ่มบัตรของคุณ
+            </div>
+            <p className="mt-1 text-sm text-gray-600">สร้างบัญชีสำเร็จแล้ว กรอกบัตรเพื่อใช้ชำระ pledge ของ GO</p>
+            <div className="mt-5">
+              <Elements stripe={stripePromise}>
+                <CardSetupForm
+                  clientSecret={cardSecret}
+                  onSuccess={() => {
+                    setCardSecret(null)
+                    setCardError("")
+                    setSuccessMessage(`ยินดีต้อนรับสู่ GO, ${pendingName}`)
+                    setShowSuccessPopup(true)
+                  }}
+                  onError={(message) => setCardError(message)}
+                />
+              </Elements>
+              {cardError && <p className="mt-3 text-sm text-red-600">{cardError}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSuccessPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#121212]/40 p-6">
           <div className="w-full max-w-md rounded-[28px] bg-white p-7 text-center shadow-2xl">
