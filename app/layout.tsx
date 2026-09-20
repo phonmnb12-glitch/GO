@@ -19,8 +19,8 @@ const _jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "go. | Bet On Yourself. Just Go.",
-  description: "แก้นิสัยผัดวันประกันพรุ่งด้วยพลัง Loss Aversion วางเงินมัดจำ ส่งหลักฐานจริงให้ Gemini AI ตรวจสอบ ทำสำเร็จรับเงินคืนทันที 100%",
-  keywords: ["go", "challenge", "loss aversion", "gemini ai", "accountability"],
+  description: "แก้นิสัยผัดวันประกันพรุ่งด้วยพลัง Loss Aversion วางเงินมัดจำ ส่งหลักฐานจริงให้ OpenAI ตรวจสอบ ทำสำเร็จรับเงินคืนทันที 100%",
+  keywords: ["go", "challenge", "loss aversion", "openai", "accountability"],
     generator: 'v0.app'
 }
 

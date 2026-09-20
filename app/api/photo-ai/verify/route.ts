@@ -1,10 +1,11 @@
 import { createClient } from "@supabase/supabase-js"
+import OpenAI from "openai"
 import { NextResponse } from "next/server"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const AI_MODEL = "gemini-2.5-flash-lite"
+const AI_MODEL = "gpt-4o-mini"
 
 const getAuthenticatedClient = async (request: Request) => {
   const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
@@ -114,7 +115,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Submission timestamp is invalid." }, { status: 400 })
     }
 
-    const apiKey = process.env.GEMINI_API_KEY
+    const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
       return NextResponse.json({ error: "ระบบ AI ไม่พร้อมใช้งานชั่วคราว" }, { status: 503 })
     }
@@ -184,46 +185,33 @@ export async function POST(request: Request) {
     const imageBuffer = Buffer.from(await imageFile.arrayBuffer())
     const imageBase64 = imageBuffer.toString("base64")
     const imageData = `data:${imageFile.type || "image/jpeg"};base64,${imageBase64}`
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          role: "user",
-          parts: [
-            {
-              text: `Evaluate this real captured photo against the mission requirements. The mission context below is the source of truth. Do not invent requirements and do not use generic photo rules. Return only JSON with exactly these keys: passed (boolean), confidence (number from 0 to 1), reason (string), issues (array of strings). Mission context:\n${buildMissionInstruction(mission, checkpoint)}`,
-            },
-            { inlineData: { mimeType: imageFile.type || "image/jpeg", data: imageBase64 } },
-          ],
-        }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              passed: { type: "BOOLEAN" },
-              confidence: { type: "NUMBER" },
-              reason: { type: "STRING" },
-              issues: { type: "ARRAY", items: { type: "STRING" } },
-            },
-            required: ["passed", "confidence", "reason", "issues"],
-          },
-        },
-      }),
-    })
 
-    if (!response.ok) {
-      const providerError = await response.text()
-      console.error("[photo-ai] Gemini request failed", response.status, providerError)
+    let rawText = ""
+    try {
+      const openai = new OpenAI({ apiKey })
+      const completion = await openai.chat.completions.create({
+        model: AI_MODEL,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "You are the GO mission photo verifier. Evaluate the submitted photo strictly against the mission context provided. The mission context is the source of truth — do not invent requirements and do not apply generic photo rules the mission doesn't ask for. Return JSON only with exactly these keys: passed (boolean), confidence (number from 0 to 1), reason (string), issues (array of strings).",
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `Evaluate this real captured photo against the mission requirements below.\n${buildMissionInstruction(mission, checkpoint)}` },
+              { type: "image_url", image_url: { url: imageData, detail: "low" } },
+            ],
+          },
+        ],
+      })
+      rawText = completion.choices[0]?.message.content ?? ""
+    } catch (providerError) {
+      console.error("[photo-ai] OpenAI request failed", providerError)
       return NextResponse.json({ error: "ระบบ AI ไม่พร้อมใช้งานชั่วคราว" }, { status: 503 })
     }
-
-    const responseBody = await response.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-    }
-    const rawText = responseBody.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ?? ""
 
     const structuredResult = parseStructuredMessage(rawText || JSON.stringify({ passed: false, confidence: 0.1, reason: "No AI response available.", issues: ["No AI response available"] }))
 

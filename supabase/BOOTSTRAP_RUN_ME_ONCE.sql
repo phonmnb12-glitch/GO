@@ -1,4 +1,55 @@
-create extension if not exists pgcrypto;
+-- profiles was never captured by a migration before this repo's history began
+-- (the original developer created it by hand in the Supabase dashboard) — this
+-- create statement reconstructs it from every column the app code actually
+-- reads/writes, so a fresh Supabase project ends up with the same shape.
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email text,
+  name text,
+  friend_id text unique default substr(replace(gen_random_uuid()::text, '-', ''), 1, 8),
+  stripe_customer_id text unique,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles
+  add column if not exists stripe_customer_id text unique;
+
+create table if not exists public.transactions (
+  transaction_id text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  mission_id text not null,
+  stripe_customer_id text not null,
+  stripe_payment_intent_id text,
+  amount numeric(12, 2) not null,
+  currency text not null default 'THB',
+  payment_status text not null default 'Pending',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists transactions_user_id_idx on public.transactions(user_id);
+create index if not exists transactions_mission_id_idx on public.transactions(mission_id);
+create index if not exists transactions_stripe_payment_intent_id_idx on public.transactions(stripe_payment_intent_id);
+
+alter table public.transactions enable row level security;
+
+drop policy if exists "Users can insert their own transactions" on public.transactions;
+create policy "Users can insert their own transactions"
+  on public.transactions for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view their own transactions" on public.transactions;
+create policy "Users can view their own transactions"
+  on public.transactions for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own transactions" on public.transactions;
+create policy "Users can update their own transactions"
+  on public.transactions for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);create extension if not exists pgcrypto;
 
 alter table public.transactions
   alter column stripe_customer_id drop not null;
@@ -387,4 +438,65 @@ begin
 end;
 $$;
 
-grant execute on function public.sync_work_team_mission(uuid) to authenticated;
+grant execute on function public.sync_work_team_mission(uuid) to authenticated;alter table public.notifications enable row level security;
+
+drop policy if exists "Users insert own notifications" on public.notifications;
+create policy "Users insert own notifications"
+  on public.notifications for insert
+  to authenticated
+  with check (user_id = auth.uid());
+
+notify pgrst, 'reload schema';
+create or replace function public.record_mission_event(
+  target_mission_id uuid,
+  target_event_type text,
+  target_payload jsonb default '{}'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  created_event_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if not exists (
+    select 1
+    from public.missions
+    where id = target_mission_id
+      and (
+        creator_id = auth.uid()
+        or exists (
+          select 1
+          from public.mission_members
+          where mission_id = target_mission_id
+            and user_id = auth.uid()
+            and status in ('accepted', 'in_progress', 'completed', 'failed')
+        )
+      )
+  ) then
+    raise exception 'Mission event access denied';
+  end if;
+
+  insert into public.mission_events (mission_id, user_id, event_type, payload)
+  values (target_mission_id, auth.uid(), target_event_type, coalesce(target_payload, '{}'::jsonb))
+  returning id into created_event_id;
+
+  return created_event_id;
+end;
+$$;
+
+grant execute on function public.record_mission_event(uuid, text, jsonb) to authenticated;
+
+notify pgrst, 'reload schema';
+drop policy if exists "Creators update own missions" on public.missions;
+create policy "Creators update own missions"
+on public.missions
+for update
+to authenticated
+using (creator_id = auth.uid())
+with check (creator_id = auth.uid());

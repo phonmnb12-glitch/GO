@@ -1,3 +1,16 @@
+-- profiles was never captured by a migration before this repo's history began
+-- (the original developer created it by hand in the Supabase dashboard) — this
+-- create statement reconstructs it from every column the app code actually
+-- reads/writes, so a fresh Supabase project ends up with the same shape.
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email text,
+  name text,
+  friend_id text unique default substr(replace(gen_random_uuid()::text, '-', ''), 1, 8),
+  stripe_customer_id text unique,
+  created_at timestamptz not null default now()
+);
+
 alter table public.profiles
   add column if not exists stripe_customer_id text unique;
 
