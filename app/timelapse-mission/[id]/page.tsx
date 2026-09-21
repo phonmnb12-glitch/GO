@@ -604,7 +604,7 @@ export default function TimelapseMissionPage() {
 
     if (mission.status === "Upcoming") {
       if (now < new Date(mission.startTime).getTime()) {
-        return "Start within 05:00"
+        return "Mission has not started yet"
       }
 
       if (!mission.startedAt && now <= startWindowDeadline) {
@@ -1125,7 +1125,13 @@ export default function TimelapseMissionPage() {
               </div>
 
               <div className="rounded-full border border-white/20 bg-black/40 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur-sm">
-                {isBreakActive ? `Break ${formatClock(breakRemainingMs)}` : mission.status === "Upcoming" && !mission.startedAt ? `START WITHIN ${formatClock(Math.max(startWindowDeadline - now, 0))}` : `TIME REMAINING ${timerDisplay}`}
+                {isBreakActive
+                  ? `Break ${formatClock(breakRemainingMs)}`
+                  : mission.status === "Upcoming" && !mission.startedAt
+                    ? (now < missionStartTime
+                      ? `STARTS IN ${formatClock(Math.max(missionStartTime - now, 0))}`
+                      : `START WITHIN ${formatClock(Math.max(startWindowDeadline - now, 0))}`)
+                    : `TIME REMAINING ${timerDisplay}`}
               </div>
 
               <div className="rounded-full border border-white/20 bg-black/40 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur-sm">
