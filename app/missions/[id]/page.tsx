@@ -150,6 +150,10 @@ export default function MissionDetail() {
   const id = params.id
   const { session, isLoading: authLoading } = useAuth()
   const [mission, setMission] = useState<Mission | null>(null)
+  // Distinguishes "still fetching" from "genuinely not found" -- without
+  // this, the not-found screen flashed on every load because `mission`
+  // starts null and the first fetch takes a moment to resolve.
+  const [hasLoadedMission, setHasLoadedMission] = useState(false)
   const [missionEvents, setMissionEvents] = useState<MissionEventRow[]>([])
   const [now, setNow] = useState(0)
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null)
@@ -238,6 +242,7 @@ export default function MissionDetail() {
       })
       const result = await response.json() as { mission?: Parameters<typeof mapWorkTeamMission>[0] }
       setMission(response.ok && result.mission ? mapWorkTeamMission(result.mission) : null)
+      setHasLoadedMission(true)
 
       const { data: events, error } = await supabase
         .from("mission_events")
@@ -557,6 +562,15 @@ export default function MissionDetail() {
     }
 
     return null
+  }
+
+  if (!mission && !hasLoadedMission) {
+    return (
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(175,255,0,0.12),_transparent_30%),linear-gradient(180deg,#f7f7f5_0%,#f2f4f6_100%)] text-[#121212]">
+        <DashboardNav />
+        <div className="mx-auto max-w-4xl px-6 py-16 text-sm text-gray-600">กำลังโหลดภารกิจ...</div>
+      </main>
+    )
   }
 
   if (!mission) {
