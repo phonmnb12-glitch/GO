@@ -275,21 +275,18 @@ export async function POST(request: Request) {
       }
     }
 
-    const { error: eventError } = await supabase
-      .from("mission_events")
-      .insert({
-        mission_id: missionId,
-        user_id: user.id,
-        event_type: "photo_ai_verified",
-        payload: {
-          checkpoint,
-          passed: structuredResult.passed,
-          confidence: structuredResult.confidence,
-          reason: structuredResult.reason,
-          issues: structuredResult.issues,
-          photo: imageData,
-        },
-      })
+    const { error: eventError } = await supabase.rpc("record_mission_event", {
+      target_mission_id: missionId,
+      target_event_type: "photo_ai_verified",
+      target_payload: {
+        checkpoint,
+        passed: structuredResult.passed,
+        confidence: structuredResult.confidence,
+        reason: structuredResult.reason,
+        issues: structuredResult.issues,
+        photo: imageData,
+      },
+    })
 
     if (eventError) {
       console.warn("[photo-ai] Mission event persistence failed", eventError.message)

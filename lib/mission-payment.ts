@@ -433,7 +433,17 @@ export async function releaseMissionPledgeHold(
   }
 
   const stripe = getStripe()
-  await stripe.paymentIntents.cancel(transaction.stripe_payment_intent_id)
+  try {
+    await stripe.paymentIntents.cancel(transaction.stripe_payment_intent_id)
+  } catch (error) {
+    // A concurrent call can win this race first (e.g. two checkpoint
+    // resolutions firing close together) -- Stripe itself already refuses to
+    // move money twice, so this specific error just means the hold is
+    // already in its terminal state. Reconcile our own record to match
+    // instead of leaving it stuck on "Authorized" forever.
+    const isAlreadyResolved = error instanceof Error && "code" in error && (error as { code?: string }).code === "payment_intent_unexpected_state"
+    if (!isAlreadyResolved) throw error
+  }
 
   const { error: updateError } = await supabaseClient
     .from("transactions")
@@ -461,7 +471,15 @@ export async function captureMissionPledgeHold(
   }
 
   const stripe = getStripe()
-  await stripe.paymentIntents.capture(transaction.stripe_payment_intent_id)
+  try {
+    await stripe.paymentIntents.capture(transaction.stripe_payment_intent_id)
+  } catch (error) {
+    // Same race as releaseMissionPledgeHold: a concurrent call can already
+    // have captured this hold, so reconcile instead of leaving the row
+    // stuck on "Authorized" despite Stripe already having resolved it.
+    const isAlreadyResolved = error instanceof Error && "code" in error && (error as { code?: string }).code === "payment_intent_unexpected_state"
+    if (!isAlreadyResolved) throw error
+  }
 
   const { error: updateError } = await supabaseClient
     .from("transactions")
