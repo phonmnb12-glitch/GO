@@ -270,6 +270,135 @@ export async function chargeMissionPledge({
   }
 }
 
+// Same hold-creation as chargeMissionPledge, but for a group mission MEMBER
+// rather than its creator -- chargeMissionPledge hard-requires
+// mission.creator_id === user.id, which a group member never satisfies.
+// Used once every invited member has accepted a Work Team / Group GPS Check
+// mission, called with a service-role client (see lib/supabase-admin.ts)
+// since it has to read/write rows belonging to whichever member is being
+// charged, not the request's own authenticated user.
+export async function chargeMissionPledgeForMember(
+  supabaseClient: SupabaseClient,
+  missionId: string,
+  memberUserId: string,
+): Promise<MissionPledgeChargeResult> {
+  const normalizedMissionId = missionId.trim()
+  if (!normalizedMissionId || !isValidMissionId(normalizedMissionId)) {
+    throw Object.assign(new Error("A valid mission ID is required."), { code: "invalid_mission_id", statusCode: 400 })
+  }
+
+  const { data: mission, error: missionError } = await supabaseClient
+    .from("missions")
+    .select("id, name, pledge_amount, status")
+    .eq("id", normalizedMissionId)
+    .maybeSingle()
+  if (missionError) throw missionError
+  if (!mission) throw Object.assign(new Error("Mission not found."), { code: "mission_not_found", statusCode: 404 })
+
+  const { data: membership, error: membershipError } = await supabaseClient
+    .from("mission_members")
+    .select("user_id, status")
+    .eq("mission_id", normalizedMissionId)
+    .eq("user_id", memberUserId)
+    .maybeSingle()
+  if (membershipError) throw membershipError
+  if (!membership || membership.status !== "accepted") {
+    throw Object.assign(new Error("This member has not accepted the mission."), { code: "member_not_accepted", statusCode: 400 })
+  }
+
+  const savedAmount = Number(mission.pledge_amount ?? 0)
+  if (!Number.isFinite(savedAmount) || savedAmount < 10) {
+    throw Object.assign(new Error("Mission pledge amount is invalid."), { code: "invalid_pledge_amount", statusCode: 400 })
+  }
+
+  const { data: profile, error: profileError } = await supabaseClient
+    .from("profiles")
+    .select("user_id, stripe_customer_id")
+    .eq("user_id", memberUserId)
+    .maybeSingle()
+  if (profileError) throw profileError
+
+  const stripeCustomerId = typeof profile?.stripe_customer_id === "string" && profile.stripe_customer_id ? profile.stripe_customer_id : null
+  if (!stripeCustomerId) {
+    throw Object.assign(new Error("This member has not saved a payment method."), { code: "missing_customer", statusCode: 400 })
+  }
+
+  const stripe = getStripe()
+  const paymentMethods = await stripe.customers.listPaymentMethods(stripeCustomerId, { type: "card" })
+  const savedPaymentMethod = paymentMethods.data[0]
+  if (!savedPaymentMethod) {
+    throw Object.assign(new Error("This member has not saved a payment method."), { code: "missing_payment_method", statusCode: 400 })
+  }
+
+  const amountInMinorUnits = Math.round(savedAmount * 100)
+  const transactionId = `go_mission_pledge_${normalizedMissionId}_${memberUserId}`
+  const idempotencyKey = transactionId
+
+  const { data: existingTransaction, error: existingTransactionError } = await supabaseClient
+    .from("transactions")
+    .select("transaction_id, stripe_payment_intent_id")
+    .eq("transaction_id", transactionId)
+    .maybeSingle()
+  if (existingTransactionError) throw existingTransactionError
+  if (existingTransaction) {
+    return {
+      paid: true,
+      missionId: normalizedMissionId,
+      transactionId,
+      paymentIntentId: typeof existingTransaction.stripe_payment_intent_id === "string" ? existingTransaction.stripe_payment_intent_id : transactionId,
+      amount: savedAmount,
+      currency: "THB",
+      customerId: stripeCustomerId,
+    }
+  }
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amountInMinorUnits,
+    currency: "thb",
+    customer: stripeCustomerId,
+    payment_method: savedPaymentMethod.id,
+    payment_method_types: ["card"],
+    confirm: true,
+    off_session: true,
+    capture_method: "manual",
+    description: `GO group mission pledge hold: ${mission.name}`,
+    metadata: { user_id: memberUserId, mission_id: normalizedMissionId, mission_name: mission.name },
+  }, { idempotencyKey })
+
+  if (paymentIntent.status !== "requires_capture") {
+    const paymentError = paymentIntent.last_payment_error ?? undefined
+    throw Object.assign(new Error(paymentError?.message ?? "Payment authorization failed for this member."), {
+      code: paymentError?.code ?? paymentIntent.status ?? "payment_required",
+      statusCode: 402,
+      paymentIntentId: paymentIntent.id,
+      paymentStatus: paymentIntent.status,
+    })
+  }
+
+  const { error: insertError } = await supabaseClient.from("transactions").insert({
+    transaction_id: transactionId,
+    user_id: memberUserId,
+    mission_id: normalizedMissionId,
+    amount: savedAmount,
+    currency: "THB",
+    payment_status: "Authorized",
+    stripe_customer_id: stripeCustomerId,
+    stripe_payment_intent_id: paymentIntent.id,
+    created_at: new Date().toISOString(),
+  })
+  if (insertError) throw insertError
+
+  return {
+    paid: true,
+    missionId: normalizedMissionId,
+    transactionId,
+    paymentIntentId: paymentIntent.id,
+    amount: savedAmount,
+    currency: "THB",
+    customerId: stripeCustomerId,
+  }
+}
+
 export type MissionPledgeResolutionResult = {
   resolved: boolean
   transactionId: string

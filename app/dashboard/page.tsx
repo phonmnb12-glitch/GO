@@ -217,6 +217,26 @@ export default function DashboardPage() {
         avatar: (friend.name ?? "?").slice(0, 2).toUpperCase(),
         online: false,
       })))
+
+      // Incoming pending friend requests -- same query the real /friends
+      // page uses. This popup never fetched these before, so the "friend
+      // requests" section always showed empty regardless of reality.
+      const { data: pendingRows } = await supabase
+        .from("friendships")
+        .select("user_id, status")
+        .eq("friend_id", session.user.id)
+        .eq("status", "pending")
+      const requesterIds = (pendingRows ?? []).map((row) => row.user_id)
+      const { data: requesterProfiles } = requesterIds.length
+        ? await supabase.from("profiles").select("user_id, name, friend_id").in("user_id", requesterIds)
+        : { data: [] as { user_id: string; name: string | null; friend_id: string | null }[] }
+      setFriendRequests((requesterProfiles ?? []).map((profile) => ({
+        id: profile.user_id,
+        name: profile.name ?? profile.user_id,
+        friendId: profile.friend_id ?? profile.user_id,
+        avatar: (profile.name ?? "?").slice(0, 2).toUpperCase(),
+        online: false,
+      })))
     }
 
     void syncMissions()
@@ -251,39 +271,58 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
-  const handleSearchFriend = () => {
-    const query = friendSearchInput.trim().toLowerCase()
+  const handleSearchFriend = async () => {
+    const query = friendSearchInput.trim()
     if (!query) {
       setSearchedUser(null)
       setSearchResultMessage("ไม่พบผู้ใช้")
       return
     }
 
-    const match = myFriends.find((user) => user.friendId.toLowerCase() === query)
-    if (!match) {
+    const { data: matches, error } = await supabase.rpc("find_user_by_friend_id", { target_friend_id: query })
+    const target = (matches as { user_id: string; name: string | null }[] | null)?.[0]
+    if (error || !target) {
       setSearchedUser(null)
       setSearchResultMessage("ไม่พบผู้ใช้")
       return
     }
 
     setSearchedUser({
-      id: match.id,
-      name: match.name,
-      friendId: match.friendId,
-      avatar: match.avatar,
+      id: target.user_id,
+      name: target.name ?? query,
+      friendId: query,
+      avatar: (target.name ?? "?").slice(0, 2).toUpperCase(),
     })
     setSearchResultMessage(null)
   }
 
-  const handleSendRequest = (user: { id: string; name: string; friendId: string; avatar: string }) => {
+  const handleSendRequest = async (user: { id: string; name: string; friendId: string; avatar: string }) => {
+    if (!session) return
+    const { error } = await supabase.from("friendships").insert({
+      user_id: session.user.id,
+      friend_id: user.id,
+      status: "pending",
+    })
+    if (error) {
+      setSearchResultMessage(error.message)
+      return
+    }
     setSentRequests((current) =>
       current.includes(user.friendId) ? current : [...current, user.friendId],
     )
   }
 
-  const handleAcceptRequest = (id: string) => {
+  const handleAcceptRequest = async (id: string) => {
+    if (!session) return
     const acceptedFriend = friendRequests.find((request) => request.id === id)
     if (!acceptedFriend) return
+
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted", accepted_at: new Date().toISOString() })
+      .eq("user_id", id)
+      .eq("friend_id", session.user.id)
+    if (error) return
 
     setMyFriends((current) => {
       const alreadyExists = current.some((friend) => friend.friendId === acceptedFriend.friendId)
@@ -292,7 +331,13 @@ export default function DashboardPage() {
     setFriendRequests((current) => current.filter((request) => request.id !== id))
   }
 
-  const handleDeclineRequest = (id: string) => {
+  const handleDeclineRequest = async (id: string) => {
+    if (!session) return
+    await supabase
+      .from("friendships")
+      .update({ status: "declined" })
+      .eq("user_id", id)
+      .eq("friend_id", session.user.id)
     setFriendRequests((current) => current.filter((request) => request.id !== id))
   }
 
