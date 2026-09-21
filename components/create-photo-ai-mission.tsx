@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
@@ -189,6 +189,37 @@ export default function CreatePhotoAIMission({ verificationType = "Photo AI" }: 
     const nextHour = part === "hour" ? moveWheelValue(hour, delta, 23) : hour
     const nextMinute = part === "minute" ? moveWheelValue(minute, delta, 59) : minute
     setStartTime(`${pad(nextHour)}:${pad(nextMinute)}`)
+  }
+
+  // onWheel only fires for a mouse/trackpad scroll, which doesn't exist on a
+  // touchscreen -- without this, phones had no way to change the hour/minute
+  // beyond the one-tap-at-a-time +-1 buttons. Pointer events cover touch,
+  // mouse, and pen in one handler, so dragging up/down on the wheel now
+  // works the same way a native picker wheel would.
+  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number } | null>(null)
+  const WHEEL_ROW_HEIGHT = 28
+
+  const handleWheelPointerDown = (part: "hour" | "minute") => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    wheelDragRef.current = { part, startY: event.clientY, consumed: 0 }
+  }
+
+  const handleWheelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = wheelDragRef.current
+    if (!drag) return
+    const totalDelta = event.clientY - drag.startY
+    const steps = Math.trunc((totalDelta - drag.consumed) / WHEEL_ROW_HEIGHT)
+    if (steps !== 0) {
+      const stepCount = Math.abs(steps)
+      for (let i = 0; i < stepCount; i += 1) {
+        changeStartTime(drag.part, steps > 0 ? -1 : 1)
+      }
+      drag.consumed += steps * WHEEL_ROW_HEIGHT
+    }
+  }
+
+  const handleWheelPointerUp = () => {
+    wheelDragRef.current = null
   }
 
   const previewEndTime = (() => {
@@ -482,7 +513,14 @@ export default function CreatePhotoAIMission({ verificationType = "Photo AI" }: 
                 <div className="flex h-[120px] flex-col">
                   <label className="mb-1 block text-xs font-semibold text-gray-600">เวลา</label>
                   <div className="flex h-[92px] min-h-0 items-center justify-center gap-3 rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-3 py-1" onWheel={(event) => { event.preventDefault(); changeStartTime(event.deltaY > 0 ? "minute" : "hour", event.deltaY > 0 ? 1 : -1) }}>
-                    <div className="flex select-none flex-col items-center leading-none" onWheel={(event) => { event.stopPropagation(); changeStartTime("hour", event.deltaY > 0 ? 1 : -1) }}>
+                    <div
+                      className="flex touch-none select-none flex-col items-center leading-none"
+                      onWheel={(event) => { event.stopPropagation(); changeStartTime("hour", event.deltaY > 0 ? 1 : -1) }}
+                      onPointerDown={handleWheelPointerDown("hour")}
+                      onPointerMove={handleWheelPointerMove}
+                      onPointerUp={handleWheelPointerUp}
+                      onPointerCancel={handleWheelPointerUp}
+                    >
                       {getWheelWindow(Number(selectedHour), 23).map((hour, index) => (
                         <button key={`${hour}-${index}`} type="button" onClick={() => setStartTime(`${pad(hour)}:${selectedMinute}`)} className={`flex h-7 w-10 items-center justify-center text-base transition-all ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>
                           {pad(hour)}
@@ -490,7 +528,14 @@ export default function CreatePhotoAIMission({ verificationType = "Photo AI" }: 
                       ))}
                     </div>
                     <span className="text-base font-bold text-[#121212]">:</span>
-                    <div className="flex select-none flex-col items-center leading-none" onWheel={(event) => { event.stopPropagation(); changeStartTime("minute", event.deltaY > 0 ? 1 : -1) }}>
+                    <div
+                      className="flex touch-none select-none flex-col items-center leading-none"
+                      onWheel={(event) => { event.stopPropagation(); changeStartTime("minute", event.deltaY > 0 ? 1 : -1) }}
+                      onPointerDown={handleWheelPointerDown("minute")}
+                      onPointerMove={handleWheelPointerMove}
+                      onPointerUp={handleWheelPointerUp}
+                      onPointerCancel={handleWheelPointerUp}
+                    >
                       {getWheelWindow(Number(selectedMinute), 59).map((minute, index) => (
                         <button key={`${minute}-${index}`} type="button" onClick={() => setStartTime(`${selectedHour}:${pad(minute)}`)} className={`flex h-7 w-10 items-center justify-center text-base transition-all ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>
                           {pad(minute)}
