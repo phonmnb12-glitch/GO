@@ -833,7 +833,7 @@ export default function TimelapseMissionPage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: { facingMode: { ideal: nextFacing } },
         audio: true,
       })
       console.log("streamReceived")

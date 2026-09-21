@@ -6,7 +6,7 @@ import { type Mission } from "@/lib/missions"
 import { supabase } from "@/lib/supabase"
 import { mapWorkTeamMission } from "@/lib/work-team-client"
 import { useParams, useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 const checkLabels = {
   first: "Checkpoint 1",
@@ -154,6 +154,12 @@ export default function MissionDetail() {
   const [now, setNow] = useState(0)
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null)
   const [isSubmittingGpsOutcome, setIsSubmittingGpsOutcome] = useState(false)
+  // Guards against submitting a second, conflicting outcome (e.g. a
+  // deadline-expired "Failed" landing right after a within-radius
+  // "Completed" already went out) while the locally-cached `mission.status`
+  // hasn't caught up to the first PATCH yet -- unlike isSubmittingGpsOutcome,
+  // this never resets, so at most one outcome is ever sent per page load.
+  const hasSubmittedGpsOutcomeRef = useRef(false)
 
   useEffect(() => {
     if (!mission || mission.verificationType !== "GPS Check" || !navigator.geolocation) return
@@ -177,7 +183,7 @@ export default function MissionDetail() {
     if (mission.verificationType !== "GPS Check") return
     if (mission.status === "Completed" || mission.status === "Failed" || mission.status === "Cancelled") return
     if (mission.gpsLatitude === undefined || mission.gpsLongitude === undefined) return
-    if (isSubmittingGpsOutcome) return
+    if (isSubmittingGpsOutcome || hasSubmittedGpsOutcomeRef.current) return
 
     const nowMs = Date.now()
     const startMs = new Date(mission.startTime).getTime()
@@ -185,6 +191,7 @@ export default function MissionDetail() {
     if (nowMs < startMs) return
 
     const submitOutcome = async (payload: Record<string, unknown>) => {
+      hasSubmittedGpsOutcomeRef.current = true
       setIsSubmittingGpsOutcome(true)
       try {
         await fetch(`/api/missions?id=${encodeURIComponent(id)}`, {

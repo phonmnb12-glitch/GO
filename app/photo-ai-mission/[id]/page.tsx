@@ -436,7 +436,7 @@ export default function PhotoAIMissionPage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: { facingMode: { ideal: requestedFacing } },
         audio: false,
       })
 
