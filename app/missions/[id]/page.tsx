@@ -188,21 +188,44 @@ export default function MissionDetail() {
     if (mission.status === "Completed" || mission.status === "Failed" || mission.status === "Cancelled") return
     if (mission.gpsLatitude === undefined || mission.gpsLongitude === undefined) return
     if (isSubmittingGpsOutcome || hasSubmittedGpsOutcomeRef.current) return
+    // A group mission must not let anyone start checking in until every
+    // invited member has accepted (mirrors Work Team) -- without this, the
+    // creator's own check-in below ran the moment start_time arrived
+    // regardless of anyone else's response.
+    if (mission.missionType === "Group" && mission.groupMissionLifecycle === "Waiting for Members") return
 
     const nowMs = Date.now()
     const startMs = new Date(mission.startTime).getTime()
     const endMs = new Date(mission.endTime).getTime()
     if (nowMs < startMs) return
 
+    const isGroup = mission.missionType === "Group"
+
     const submitOutcome = async (payload: Record<string, unknown>) => {
       hasSubmittedGpsOutcomeRef.current = true
       setIsSubmittingGpsOutcome(true)
       try {
-        await fetch(`/api/missions?id=${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify(payload),
-        })
+        if (isGroup) {
+          // Marks just this member's own mission_members row, not the whole
+          // mission -- a raw PATCH to /api/missions would otherwise stomp
+          // the shared mission status based on only one member's location.
+          await supabase.rpc("complete_gps_check_group_member", {
+            target_mission_id: id,
+            outcome: payload.status === "Completed" ? "completed" : "failed",
+            check_in_latitude: payload.gpsCheckInLatitude ?? null,
+            check_in_longitude: payload.gpsCheckInLongitude ?? null,
+            check_in_distance: payload.gpsCheckInDistance ?? null,
+          })
+          await fetch(`/api/work-team/${encodeURIComponent(id)}`, {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          })
+        } else {
+          await fetch(`/api/missions?id=${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify(payload),
+          })
+        }
       } catch (error) {
         console.error("[GPS Check] Failed to submit outcome", error)
       } finally {

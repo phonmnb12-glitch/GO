@@ -66,6 +66,15 @@ export async function POST(request: Request) {
 		friendship.user_id === context.user.id ? friendship.friend_id : friendship.user_id,
 	))
 	const validInvitedUserIds = invitedUserIds.filter((userId) => acceptedFriendIds.has(userId))
+	// A group mission (Group GPS Check is the only type created through this
+	// route -- Work Team has its own dedicated create_work_team_mission RPC)
+	// must wait for every invited member to accept before it can ever start,
+	// mirroring Work Team's own gate. Without this override it was created
+	// straight into "upcoming", so the creator's own check-in effect started
+	// running the moment start_time arrived regardless of anyone else's
+	// response.
+	const isGatedGroupMission = missionType === "group" && validInvitedUserIds.length > 0
+	const initialStatus = isGatedGroupMission ? "waiting_for_members" : status
 
 	const { data: mission, error: missionError } = await context.client.from("missions").insert({
 		creator_id: context.user.id,
@@ -87,7 +96,7 @@ export async function POST(request: Request) {
 		gps_latitude: body.gpsLatitude ?? null,
 		gps_longitude: body.gpsLongitude ?? null,
 		checks: body.checks ?? { first: "Waiting", mid: "Waiting", final: "Waiting" },
-		status,
+		status: initialStatus,
 	}).select("*").single()
 
 	if (missionError) return NextResponse.json({ error: missionError.message }, { status: 400 })
@@ -115,6 +124,31 @@ export async function POST(request: Request) {
 	]
 	const { error: membersError } = await context.client.from("mission_members").insert(members)
 	if (membersError) return NextResponse.json({ error: membersError.message }, { status: 400 })
+
+	if (isGatedGroupMission) {
+		const pendingMemberIds = members.filter((member) => member.role === "member").map((member) => member.user_id)
+		const { error: invitationNotificationError } = await context.client.from("notifications").insert(
+			pendingMemberIds.map((userId) => ({
+				user_id: userId,
+				mission_id: mission.id,
+				event_type: "group_invitation",
+				title: "Group Mission Invitation",
+				description: `You have been invited to join ${mission.name}.`,
+				payload: {
+					mission_name: mission.name,
+					creator_id: context.user.id,
+					start_time: mission.start_time,
+					end_time: mission.end_time,
+					duration_minutes: mission.duration_minutes,
+					pledge_amount: mission.pledge_amount,
+				},
+				action: "respond",
+			})),
+		)
+		if (invitationNotificationError) {
+			console.warn("[missions] group invitation notification insert failed", invitationNotificationError.message)
+		}
+	}
 
 	return NextResponse.json({ mission }, { status: 201 })
 }

@@ -331,6 +331,18 @@ export default function GPSCheckMissionPage() {
       }
       const paymentMissionName = missionName.trim()
       if (!paymentMissionName) throw new Error("Mission name is required before payment.")
+
+      // Group missions wait for every invite to accept before anyone is
+      // charged (mirrors Work Team) -- the pledge hold happens later via
+      // chargeAcceptedMembers, triggered once respond_work_team_invitation
+      // reports everyone_accepted. Charging the creator here, immediately on
+      // creation, was the bug: it let the creator's own work start right
+      // away regardless of whether anyone else had responded yet.
+      if (isGroupMission) {
+        finalizeMission({ ...createdMission, missionName: paymentMissionName, pledgeAmount: selectedPledge })
+        return
+      }
+
       window.sessionStorage.setItem("go-pending-paid-mission", JSON.stringify(createdMission))
       const response = await fetch("/api/stripe/charge-mission-pledge", {
         method: "POST",
