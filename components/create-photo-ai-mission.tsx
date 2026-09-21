@@ -471,6 +471,7 @@ export default function CreatePhotoAIMission({ verificationType = "Photo AI" }: 
                       min={defaultDate}
                       aria-label="วันที่เริ่มภารกิจ"
                       onChange={(e) => setStartDate(e.target.value)}
+                      style={{ color: "transparent", caretColor: "transparent" }}
                       className="start-date-input absolute inset-0 h-full w-full rounded-xl border border-[#121212]/10 bg-[#f9f9f8] px-3 py-2 text-center text-base font-semibold focus:border-[#AFFF00] focus:outline-none focus:ring-2 focus:ring-[#AFFF00]/20"
                     />
                     <span className="pointer-events-none absolute inset-0 flex items-center justify-center pr-8 text-base font-semibold text-[#121212]">
