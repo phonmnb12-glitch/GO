@@ -1,0 +1,121 @@
+import { createClient } from "@supabase/supabase-js"
+import { NextResponse } from "next/server"
+
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { resolveGroupPledges } from "@/lib/work-team-pledges"
+
+export const dynamic = "force-dynamic"
+
+const getClient = async (request: Request) => {
+  const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  if (!accessToken || !url || !key) return null
+  const client = createClient(url, key, { global: { headers: { Authorization: `Bearer ${accessToken}` } } })
+  const { data: { user }, error } = await client.auth.getUser(accessToken)
+  if (error || !user) return null
+  return { client, user }
+}
+
+// A group member confirms ANOTHER member's submitted work (see
+// submit-work/route.ts). Per spec, a submission only counts as done once
+// every OTHER accepted member has confirmed it -- at that point this marks
+// just that one member completed (using the service-role client, since a
+// peer confirming isn't the affected member themselves, so the existing
+// self-only complete_work_team_member RPC doesn't apply here) and, once
+// every member in the mission has reached completed, finishes the mission
+// and releases every pledge hold the same way manual completion already
+// does.
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const auth = await getClient(request)
+  if (!auth) return NextResponse.json({ error: "Authentication is required." }, { status: 401 })
+  const { id: missionId } = await context.params
+  const body = await request.json().catch(() => ({})) as { targetMemberId?: string }
+  const targetMemberId = body.targetMemberId
+  if (!targetMemberId) return NextResponse.json({ error: "targetMemberId is required." }, { status: 400 })
+  if (targetMemberId === auth.user.id) return NextResponse.json({ error: "You cannot confirm your own submission." }, { status: 400 })
+
+  const { data: confirmerMembership, error: confirmerError } = await auth.client
+    .from("mission_members")
+    .select("user_id, status")
+    .eq("mission_id", missionId)
+    .eq("user_id", auth.user.id)
+    .maybeSingle()
+  if (confirmerError) return NextResponse.json({ error: confirmerError.message }, { status: 400 })
+  if (!confirmerMembership) return NextResponse.json({ error: "Mission access denied." }, { status: 403 })
+
+  const { error: eventError } = await auth.client.rpc("record_mission_event", {
+    target_mission_id: missionId,
+    target_event_type: "work_confirmed",
+    target_payload: { target_member_id: targetMemberId },
+  })
+  if (eventError) return NextResponse.json({ error: eventError.message }, { status: 400 })
+
+  const admin = getSupabaseAdmin()
+
+  const { data: allMembers, error: membersError } = await admin
+    .from("mission_members")
+    .select("user_id, status")
+    .eq("mission_id", missionId)
+  if (membersError) return NextResponse.json({ error: membersError.message }, { status: 500 })
+
+  const requiredConfirmerIds = new Set((allMembers ?? []).map((member) => member.user_id).filter((userId) => userId !== targetMemberId))
+
+  const { data: confirmations, error: confirmationsError } = await admin
+    .from("mission_events")
+    .select("user_id")
+    .eq("mission_id", missionId)
+    .eq("event_type", "work_confirmed")
+    .eq("payload->>target_member_id", targetMemberId)
+  if (confirmationsError) return NextResponse.json({ error: confirmationsError.message }, { status: 500 })
+
+  const confirmedBy = new Set((confirmations ?? []).map((row) => row.user_id))
+  const everyoneConfirmed = [...requiredConfirmerIds].every((userId) => confirmedBy.has(userId))
+
+  let missionCompleted = false
+  if (everyoneConfirmed) {
+    await admin
+      .from("mission_members")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("mission_id", missionId)
+      .eq("user_id", targetMemberId)
+
+    await admin.from("notifications").insert({
+      user_id: targetMemberId,
+      mission_id: missionId,
+      event_type: "work_confirmed_complete",
+      title: "งานของคุณได้รับการยืนยันครบแล้ว",
+      description: "เพื่อนในทีมยืนยันงานของคุณครบทุกคนแล้ว ระบบจะคืนเงินมัดจำให้อัตโนมัติ",
+    })
+
+    // Release THIS member's own pledge hold now -- per spec, each person's
+    // deposit comes back as soon as their own work is confirmed, not only
+    // once the whole group has finished (checked separately below).
+    await resolveGroupPledges(missionId)
+
+    const { data: refreshedMembers } = await admin
+      .from("mission_members")
+      .select("status")
+      .eq("mission_id", missionId)
+    missionCompleted = (refreshedMembers ?? []).every((member) => member.status === "completed")
+
+    if (missionCompleted) {
+      await admin.from("missions").update({ status: "completed" }).eq("id", missionId)
+      const { data: memberIds } = await admin.from("mission_members").select("user_id").eq("mission_id", missionId)
+      if (memberIds?.length) {
+        await admin.from("notifications").insert(
+          memberIds.map((member) => ({
+            user_id: member.user_id,
+            mission_id: missionId,
+            event_type: "group_mission_completed",
+            title: "Group Mission Completed",
+            description: "Everyone completed the mission.",
+          })),
+        )
+      }
+      await resolveGroupPledges(missionId)
+    }
+  }
+
+  return NextResponse.json({ ok: true, targetMemberId, everyoneConfirmed, missionCompleted })
+}

@@ -4,10 +4,11 @@ import { DashboardNav } from "@/components/dashboard-nav"
 import { supabase } from "@/lib/supabase"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 type Mission = { id: string; name: string; description: string; category: string; start_time: string; end_time: string; pledge_amount: number; status: string }
-type Member = { user_id: string; role: string; status: string; payment_status: string; completed_at?: string; failed_at?: string; profile?: { name?: string; friend_id?: string } | null }
+type Submission = { percent: number; reason: string; photo: string; submittedAt: string }
+type Member = { user_id: string; role: string; status: string; payment_status: string; completed_at?: string; failed_at?: string; profile?: { name?: string; friend_id?: string } | null; submission?: Submission | null; confirmedBy?: string[] }
 type Payload = { mission?: Mission; members?: Member[]; viewerId?: string; error?: string }
 
 const statusClasses: Record<string, string> = {
@@ -28,6 +29,9 @@ export default function WorkTeamMissionDetailPage() {
   const [now, setNow] = useState(Date.now())
   const [errorMessage, setErrorMessage] = useState("")
   const [isActing, setIsActing] = useState(false)
+  const [isSubmittingWork, setIsSubmittingWork] = useState(false)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const loadMission = async () => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -64,6 +68,51 @@ export default function WorkTeamMissionDetailPage() {
     }
   }
 
+  const submitWork = async (file: File) => {
+    setIsSubmittingWork(true)
+    setErrorMessage("")
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error("Authentication is required.")
+      const formData = new FormData()
+      formData.append("image", file)
+      const response = await fetch(`/api/work-team/${params.id}/submit-work`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? "Unable to submit work.")
+      await loadMission()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to submit work.")
+    } finally {
+      setIsSubmittingWork(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  const confirmWork = async (targetMemberId: string) => {
+    setConfirmingId(targetMemberId)
+    setErrorMessage("")
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error("Authentication is required.")
+      const response = await fetch(`/api/work-team/${params.id}/confirm-work`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ targetMemberId }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? "Unable to confirm work.")
+      await loadMission()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to confirm work.")
+    } finally {
+      setConfirmingId(null)
+    }
+  }
+
   const mission = payload.mission
   const members = payload.members ?? []
   const completed = members.filter((member) => member.status === "completed").length
@@ -88,9 +137,86 @@ export default function WorkTeamMissionDetailPage() {
 
         <section className="mt-6 grid gap-3 md:grid-cols-3"><div className="rounded-[24px] border border-[#111111]/5 bg-white p-4"><div className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#6b6b6b]">เวลาเริ่ม</div><div className="mt-2 text-base font-bold">{formatTime(mission.start_time)}</div></div><div className="rounded-[24px] border border-[#111111]/5 bg-white p-4"><div className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#6b6b6b]">เวลาสิ้นสุด</div><div className="mt-2 text-base font-bold">{formatTime(mission.end_time)}</div></div><div className="rounded-[24px] border border-[#111111]/5 bg-white p-4"><div className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#6b6b6b]">เวลาที่เหลือ</div><div className="mt-2 text-base font-bold">{mission.status === "in_progress" ? timeRemaining : mission.status === "upcoming" ? "รอเริ่ม" : "—"}</div></div></section>
 
-        <section className="mt-6 rounded-[30px] border border-[#111111]/5 bg-white p-5 sm:p-6"><div className="flex items-center justify-between gap-4"><div><p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#6b6b6b]">สมาชิก</p><h2 className="mt-2 text-2xl font-black tracking-[-0.06em]">สมาชิกทีม</h2></div><span className="rounded-full border border-[#AFFF00]/60 bg-[#f1ffc9] px-3 py-1.5 text-xs font-semibold">{members.length} คน</span></div><div className="mt-5 grid gap-3 md:grid-cols-2">{members.map((member) => <div key={member.user_id} className="flex items-center justify-between gap-3 rounded-2xl border border-[#111111]/10 bg-[#f7f7f5] p-4"><div className="min-w-0"><div className="truncate text-sm font-semibold">{member.profile?.name ?? member.user_id}</div><div className="mt-1 truncate text-xs text-[#6b6b6b]">{member.profile?.friend_id ?? member.user_id}</div></div><span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses[member.status] ?? "border-gray-200 bg-white text-gray-700"}`}>{labelStatus(member.status)}</span></div>)}</div></section>
+        <section className="mt-6 rounded-[30px] border border-[#111111]/5 bg-white p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div><p className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#6b6b6b]">สมาชิก</p><h2 className="mt-2 text-2xl font-black tracking-[-0.06em]">สมาชิกทีม</h2></div>
+            <span className="rounded-full border border-[#AFFF00]/60 bg-[#f1ffc9] px-3 py-1.5 text-xs font-semibold">{members.length} คน</span>
+          </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {members.map((member) => {
+              const isViewer = member.user_id === payload.viewerId
+              const alreadyConfirmedByViewer = (member.confirmedBy ?? []).includes(payload.viewerId ?? "")
+              return (
+                <div key={member.user_id} className="rounded-2xl border border-[#111111]/10 bg-[#f7f7f5] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{member.profile?.name ?? member.user_id}{isViewer && " (คุณ)"}</div>
+                      <div className="mt-1 truncate text-xs text-[#6b6b6b]">{member.profile?.friend_id ?? member.user_id}</div>
+                    </div>
+                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses[member.status] ?? "border-gray-200 bg-white text-gray-700"}`}>{labelStatus(member.status)}</span>
+                  </div>
+                  {member.submission && (
+                    <div className="mt-3 rounded-xl border border-[#111111]/10 bg-white p-3">
+                      <div className="flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={member.submission.photo} alt="งานที่ส่ง" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-bold text-[#111111]">ตรงกับงาน {member.submission.percent}%</div>
+                          <div className="truncate text-xs text-[#6b6b6b]">{member.submission.reason}</div>
+                        </div>
+                      </div>
+                      {!isViewer && member.status !== "completed" && (
+                        <button
+                          type="button"
+                          disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
+                          onClick={() => void confirmWork(member.user_id)}
+                          className="mt-3 w-full rounded-full bg-[#AFFF00] px-4 py-2 text-xs font-semibold text-[#121212] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {alreadyConfirmedByViewer ? "ยืนยันแล้ว" : confirmingId === member.user_id ? "กำลังยืนยัน..." : "ยืนยันงานนี้"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
 
-        {viewer && <div className="mt-6 flex flex-wrap justify-end gap-3">{viewer.status === "pending" && <><button type="button" disabled={isActing} onClick={() => void act("decline")} className="rounded-full border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700 disabled:opacity-50">ปฏิเสธ</button><button type="button" disabled={isActing} onClick={() => void act("accept")} className="rounded-full bg-[#AFFF00] px-5 py-3 text-sm font-semibold text-[#121212] disabled:opacity-50">ตอบรับ</button></>}{(viewer.status === "accepted" || viewer.status === "in_progress") && mission.status === "in_progress" && <button type="button" disabled={isActing} onClick={() => void act("complete")} className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">เสร็จสิ้นภารกิจ</button>}</div>}
+        {viewer && (
+          <div className="mt-6 flex flex-wrap justify-end gap-3">
+            {viewer.status === "pending" && (
+              <>
+                <button type="button" disabled={isActing} onClick={() => void act("decline")} className="rounded-full border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700 disabled:opacity-50">ปฏิเสธ</button>
+                <button type="button" disabled={isActing} onClick={() => void act("accept")} className="rounded-full bg-[#AFFF00] px-5 py-3 text-sm font-semibold text-[#121212] disabled:opacity-50">ตอบรับ</button>
+              </>
+            )}
+            {(viewer.status === "accepted" || viewer.status === "in_progress") && mission.status === "in_progress" && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) void submitWork(file)
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={isSubmittingWork}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-full border border-[#111111]/15 bg-white px-5 py-3 text-sm font-semibold text-[#111111] disabled:opacity-50"
+                >
+                  {isSubmittingWork ? "กำลังส่ง..." : "ถ่ายรูปส่งงาน"}
+                </button>
+                <button type="button" disabled={isActing} onClick={() => void act("complete")} className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">เสร็จสิ้นภารกิจ</button>
+              </>
+            )}
+          </div>
+        )}
         {errorMessage && <p className="mt-4 text-right text-sm text-red-600">{errorMessage}</p>}
       </div>
     </main>
