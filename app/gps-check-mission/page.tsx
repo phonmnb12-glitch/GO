@@ -10,7 +10,7 @@ import { addNotification } from "@/lib/event-store"
 import { supabase } from "@/lib/supabase"
 import { ArrowLeft, Crosshair, MapPin, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useRef, useState, type TouchEvent } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 type Destination = {
   name: string
@@ -89,7 +89,6 @@ export default function GPSCheckMissionPage() {
   const [errors, setErrors] = useState<string[]>([])
   const [isCreated, setIsCreated] = useState(false)
   const [isPaying, setIsPaying] = useState(false)
-  const wheelTouchStart = useRef<{ part: "hour" | "minute"; y: number } | null>(null)
 
   useEffect(() => {
     setIsGroupMission(new URLSearchParams(window.location.search).get("mode") === "group")
@@ -407,17 +406,35 @@ export default function GPSCheckMissionPage() {
     setEndTime(`${String(nextHour).padStart(2, "0")}:${String(nextMinute).padStart(2, "0")}`)
   }
 
-  const handleWheelTouchStart = (part: "hour" | "minute", event: TouchEvent<HTMLDivElement>) => {
-    wheelTouchStart.current = { part, y: event.touches[0]?.clientY ?? 0 }
+  // A swipe only ever moved the value by one step no matter how far you
+  // dragged, so scrolling several hours took many repeated small swipes and
+  // felt unresponsive/easy to mistap. Pointer events (covers touch, mouse,
+  // and pen) with a running drag distance now move multiple steps per
+  // gesture, the same way a native picker wheel would.
+  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number } | null>(null)
+  const WHEEL_ROW_HEIGHT = 28
+
+  const handleWheelPointerDown = (part: "hour" | "minute") => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    wheelDragRef.current = { part, startY: event.clientY, consumed: 0 }
   }
 
-  const handleWheelTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
-    const touch = wheelTouchStart.current
-    if (!touch) return
+  const handleWheelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = wheelDragRef.current
+    if (!drag) return
+    const totalDelta = event.clientY - drag.startY
+    const steps = Math.trunc((totalDelta - drag.consumed) / WHEEL_ROW_HEIGHT)
+    if (steps !== 0) {
+      const stepCount = Math.abs(steps)
+      for (let i = 0; i < stepCount; i += 1) {
+        changeEndTime(drag.part, steps > 0 ? -1 : 1)
+      }
+      drag.consumed += steps * WHEEL_ROW_HEIGHT
+    }
+  }
 
-    const deltaY = (event.changedTouches[0]?.clientY ?? touch.y) - touch.y
-    if (Math.abs(deltaY) > 12) changeEndTime(touch.part, deltaY > 0 ? -1 : 1)
-    wheelTouchStart.current = null
+  const handleWheelPointerUp = () => {
+    wheelDragRef.current = null
   }
 
   return (
@@ -475,7 +492,7 @@ export default function GPSCheckMissionPage() {
                     <input type="date" aria-label="วันที่สิ้นสุดภารกิจ" value={endDate} min={toDateInputValue(creationTime)} onChange={(event) => setEndDate(event.target.value)} className="w-full rounded-xl border border-[#121212]/10 bg-white px-3 py-3 text-sm font-semibold outline-none transition focus:border-[#AFFF00] focus:ring-2 focus:ring-[#AFFF00]/20" />
                   </div>
                 </div>
-                <div className="flex h-[184px] w-full flex-col justify-center text-sm font-medium"><div>เวลาสิ้นสุดภารกิจ (End Time)</div><div className="mt-2 flex w-full flex-1 overscroll-contain items-center justify-center gap-5 rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-2 outline-none transition duration-300 hover:border-[#AFFF00]" aria-label="เลือกเวลาสิ้นสุดภารกิจ" onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}><div className="flex select-none touch-none flex-col items-center leading-none" onWheel={(event) => { event.preventDefault(); event.stopPropagation(); changeEndTime("hour", event.deltaY > 0 ? 1 : -1) }} onTouchStart={(event) => handleWheelTouchStart("hour", event)} onTouchEnd={handleWheelTouchEnd}>{hourWheelWindow.map((hour, index) => <button key={`${hour}-${index}`} type="button" onClick={() => changeEndTime("hour", index - 1)} className={`flex h-7 w-12 items-center justify-center text-xl transition-all duration-300 ease-out ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>{String(hour).padStart(2, "0")}</button>)}</div><span className="text-xl font-bold text-[#121212]">:</span><div className="flex select-none touch-none flex-col items-center leading-none" onWheel={(event) => { event.preventDefault(); event.stopPropagation(); changeEndTime("minute", event.deltaY > 0 ? 1 : -1) }} onTouchStart={(event) => handleWheelTouchStart("minute", event)} onTouchEnd={handleWheelTouchEnd}>{minuteWheelWindow.map((minute, index) => <button key={`${minute}-${index}`} type="button" onClick={() => changeEndTime("minute", index - 1)} className={`flex h-7 w-12 items-center justify-center text-xl transition-all duration-300 ease-out ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>{String(minute).padStart(2, "0")}</button>)}</div></div></div>
+                <div className="flex h-[184px] w-full flex-col justify-center text-sm font-medium"><div>เวลาสิ้นสุดภารกิจ (End Time)</div><div className="mt-2 flex w-full flex-1 overscroll-contain items-center justify-center gap-5 rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-2 outline-none transition duration-300 hover:border-[#AFFF00]" aria-label="เลือกเวลาสิ้นสุดภารกิจ" onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}><div className="flex touch-none select-none flex-col items-center leading-none" onWheel={(event) => { event.preventDefault(); event.stopPropagation(); changeEndTime("hour", event.deltaY > 0 ? 1 : -1) }} onPointerDown={handleWheelPointerDown("hour")} onPointerMove={handleWheelPointerMove} onPointerUp={handleWheelPointerUp} onPointerCancel={handleWheelPointerUp}>{hourWheelWindow.map((hour, index) => <button key={`${hour}-${index}`} type="button" onClick={() => changeEndTime("hour", index - 1)} className={`flex h-7 w-12 items-center justify-center text-xl transition-all duration-300 ease-out ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>{String(hour).padStart(2, "0")}</button>)}</div><span className="text-xl font-bold text-[#121212]">:</span><div className="flex touch-none select-none flex-col items-center leading-none" onWheel={(event) => { event.preventDefault(); event.stopPropagation(); changeEndTime("minute", event.deltaY > 0 ? 1 : -1) }} onPointerDown={handleWheelPointerDown("minute")} onPointerMove={handleWheelPointerMove} onPointerUp={handleWheelPointerUp} onPointerCancel={handleWheelPointerUp}>{minuteWheelWindow.map((minute, index) => <button key={`${minute}-${index}`} type="button" onClick={() => changeEndTime("minute", index - 1)} className={`flex h-7 w-12 items-center justify-center text-xl transition-all duration-300 ease-out ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>{String(minute).padStart(2, "0")}</button>)}</div></div></div>
               </div>
               {isEndTimeInvalid && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"><div>เวลาสิ้นสุดไม่ถูกต้อง</div><div>กรุณาเลือกเวลาที่มากกว่าเวลาปัจจุบัน</div></div>}
               {!isEndTimeInvalid && <div className="mt-4 rounded-xl border border-[#AFFF00]/30 bg-[#AFFF00]/10 p-3 text-sm">Duration: <strong>{selectedDuration} นาที</strong> · End Time: <strong>{endDateTime.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}</strong></div>}
