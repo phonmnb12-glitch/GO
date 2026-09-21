@@ -24,6 +24,7 @@ export function DashboardNav({ onOpenAddFriends, onOpenNotifications, notificati
             <Link href="/dashboard" className="rounded-full px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-[#121212]/5 hover:text-gray-900">หน้าแรก</Link>
             <Link href="/create-mission" className="rounded-full px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-[#121212]/5 hover:text-gray-900">สร้างภารกิจ</Link>
             <Link href="/missions" className="rounded-full px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-[#121212]/5 hover:text-gray-900">ภารกิจ</Link>
+            <Link href="/help" className="rounded-full px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-[#121212]/5 hover:text-gray-900">ช่วยเหลือ</Link>
             {onOpenAddFriends ? (
               <button
                 type="button"
