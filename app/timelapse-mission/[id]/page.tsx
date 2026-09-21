@@ -1213,9 +1213,9 @@ onClick={() => {
                 <button
                   type="button"
                   onClick={() => setChatOpen(true)}
-                  className="pointer-events-auto relative z-40 inline-flex items-center gap-2 rounded-full bg-[#121212]/85 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-white shadow-[0_18px_30px_rgba(18,18,18,0.25)] backdrop-blur-xl transition hover:bg-[#2a2a2a]"
+                  className="pointer-events-auto relative z-40 inline-flex items-center gap-2 rounded-full bg-[#AFFF00] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#121212] shadow-[0_18px_30px_rgba(175,255,0,0.45)] transition hover:bg-[#c2ff4d]"
                 >
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#AFFF00] text-[9px] font-bold text-[#121212]">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#121212] text-[9px] font-bold text-[#AFFF00]">
                     AI
                   </span>
                   Chat
