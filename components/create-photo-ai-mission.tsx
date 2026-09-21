@@ -196,18 +196,29 @@ export default function CreatePhotoAIMission({ verificationType = "Photo AI" }: 
   // beyond the one-tap-at-a-time +-1 buttons. Pointer events cover touch,
   // mouse, and pen in one handler, so dragging up/down on the wheel now
   // works the same way a native picker wheel would.
-  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number } | null>(null)
+  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number; captured: boolean } | null>(null)
   const WHEEL_ROW_HEIGHT = 28
+  const WHEEL_DRAG_THRESHOLD = 6
 
   const handleWheelPointerDown = (part: "hour" | "minute") => (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    wheelDragRef.current = { part, startY: event.clientY, consumed: 0 }
+    // Capture is deferred until real drag movement is detected -- capturing
+    // immediately on pointerdown (the previous version) swallowed the click
+    // that was supposed to land on the actual number button under the
+    // finger, so tapping the visible +-1 values stopped working entirely
+    // once dragging was added. A plain tap now never captures, so its
+    // native click still fires normally.
+    wheelDragRef.current = { part, startY: event.clientY, consumed: 0, captured: false }
   }
 
   const handleWheelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = wheelDragRef.current
     if (!drag) return
     const totalDelta = event.clientY - drag.startY
+    if (!drag.captured) {
+      if (Math.abs(totalDelta) < WHEEL_DRAG_THRESHOLD) return
+      drag.captured = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     const steps = Math.trunc((totalDelta - drag.consumed) / WHEEL_ROW_HEIGHT)
     if (steps !== 0) {
       const stepCount = Math.abs(steps)

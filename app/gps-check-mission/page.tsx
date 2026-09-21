@@ -411,18 +411,28 @@ export default function GPSCheckMissionPage() {
   // felt unresponsive/easy to mistap. Pointer events (covers touch, mouse,
   // and pen) with a running drag distance now move multiple steps per
   // gesture, the same way a native picker wheel would.
-  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number } | null>(null)
+  const wheelDragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number; captured: boolean } | null>(null)
   const WHEEL_ROW_HEIGHT = 28
+  const WHEEL_DRAG_THRESHOLD = 6
 
   const handleWheelPointerDown = (part: "hour" | "minute") => (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    wheelDragRef.current = { part, startY: event.clientY, consumed: 0 }
+    // Capture is deferred until real drag movement is detected -- capturing
+    // immediately on pointerdown swallowed the click meant for the actual
+    // number button under the finger, so tapping the visible +-1 values
+    // stopped working. A plain tap never captures, so its native click
+    // still fires normally.
+    wheelDragRef.current = { part, startY: event.clientY, consumed: 0, captured: false }
   }
 
   const handleWheelPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = wheelDragRef.current
     if (!drag) return
     const totalDelta = event.clientY - drag.startY
+    if (!drag.captured) {
+      if (Math.abs(totalDelta) < WHEEL_DRAG_THRESHOLD) return
+      drag.captured = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
     const steps = Math.trunc((totalDelta - drag.consumed) / WHEEL_ROW_HEIGHT)
     if (steps !== 0) {
       const stepCount = Math.abs(steps)
