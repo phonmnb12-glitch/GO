@@ -1209,7 +1209,7 @@ onClick={() => {
             </div>
 
             {!chatOpen && (
-              <div className="pointer-events-none absolute bottom-4 right-4 z-30">
+              <div className="pointer-events-none absolute bottom-20 right-4 z-30">
                 <button
                   type="button"
                   onClick={() => setChatOpen(true)}
