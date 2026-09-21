@@ -2,9 +2,18 @@
 
 import { DashboardNav } from "@/components/dashboard-nav"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
+import { useState } from "react"
+
+const groupMissionTypes = [
+  { key: "work-team", label: "ทีมงาน", description: "ทำงานร่วมกับเพื่อน", href: "/work-team-mission" },
+  { key: "gps-check", label: "GPS Check", description: "ติดตามความคืบหน้าร่วมกัน", href: "/gps-check-mission?mode=group" },
+]
 
 export default function GroupMissionPage() {
+  const router = useRouter()
+  const [selectedType, setSelectedType] = useState<string | null>(null)
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(175,255,0,0.12),_transparent_30%),linear-gradient(180deg,#f7f7f5_0%,#f2f4f6_100%)] text-[#121212]">
@@ -32,19 +41,34 @@ export default function GroupMissionPage() {
           </p>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {[
-              { label: "ทีมงาน", value: "ทำงานร่วมกับเพื่อน", href: "/work-team-mission" },
-              { label: "GPS Check", value: "ติดตามความคืบหน้าร่วมกัน", href: "/gps-check-mission?mode=group" },
-            ].map((item) => (
-              <Link href={item.href ?? "/missions"} key={item.label} className="rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] p-4 transition hover:border-[#AFFF00]/50 hover:bg-[#AFFF00]/10">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#121212]"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#AFFF00]"><Check className="h-3.5 w-3.5" strokeWidth={3} /></span>{item.label}</div>
-                <div className="mt-1 text-xs text-gray-600">{item.value}</div>
-              </Link>
-            ))}
+            {groupMissionTypes.map((type) => {
+              const isSelected = selectedType === type.key
+              return (
+                <button
+                  key={type.key}
+                  type="button"
+                  onClick={() => setSelectedType(type.key)}
+                  className={`rounded-2xl border p-4 text-left transition ${isSelected ? "border-[#AFFF00] bg-[#AFFF00]/15" : "border-[#121212]/10 bg-[#f9f9f8] hover:border-[#AFFF00]/50 hover:bg-[#AFFF00]/10"}`}
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-[#121212]"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#AFFF00]"><Check className="h-3.5 w-3.5" strokeWidth={3} /></span>{type.label}</div>
+                  <div className="mt-1 text-xs text-gray-600">{type.description}</div>
+                </button>
+              )
+            })}
           </div>
 
           <div className="mt-8 flex justify-end">
-            <Link href="/missions" className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#2f2f2f]">ดำเนินการต่อ</Link>
+            <button
+              type="button"
+              disabled={!selectedType}
+              onClick={() => {
+                const type = groupMissionTypes.find((item) => item.key === selectedType)
+                if (type) router.push(type.href)
+              }}
+              className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#2f2f2f] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ดำเนินการต่อ
+            </button>
           </div>
         </div>
       </div>
