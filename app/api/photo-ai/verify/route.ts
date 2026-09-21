@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
 import OpenAI from "openai"
 import { NextResponse } from "next/server"
+import { captureMissionPledgeHold, releaseMissionPledgeHold } from "@/lib/mission-payment"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -167,14 +168,23 @@ export async function POST(request: Request) {
       }
       const hasAnyMissed = Object.values(nextChecks).some((value) => value === "Missed")
       const nextStatus = hasAnyMissed ? "Failed" : mission.status === "Completed" ? "Completed" : mission.status
+      const dbStatus = nextStatus === "Completed" ? "completed" : nextStatus === "Failed" ? "failed" : mission.status
 
       await supabase
         .from("missions")
         .update({
           checks: nextChecks,
-          status: nextStatus,
+          status: dbStatus,
         })
         .eq("id", missionId)
+
+      if (dbStatus === "failed") {
+        try {
+          await captureMissionPledgeHold(supabase, missionId, mission.creator_id)
+        } catch (pledgeError) {
+          console.error("[photo-ai] Pledge capture failed (checkpoint expired)", pledgeError)
+        }
+      }
 
       return NextResponse.json({
         error: "หมดเวลาส่งภายใน 5 นาที ภารกิจไม่สำเร็จ",
@@ -229,18 +239,40 @@ export async function POST(request: Request) {
     const hasAllCompleted = Object.values(nextChecks).every((value) => value === "Completed")
     const hasAnyMissed = Object.values(nextChecks).some((value) => value === "Missed")
     const nextStatus = hasAllCompleted ? "Completed" : hasAnyMissed ? "Failed" : mission.status === "Completed" ? "Completed" : mission.status
+    // missions.status only accepts the lowercase values the DB check
+    // constraint defines (completed/failed/in_progress/...) -- nextStatus
+    // above stays PascalCase because that's what the API response/frontend
+    // already expect, so it's translated only for the actual DB write.
+    const dbStatus = nextStatus === "Completed" ? "completed" : nextStatus === "Failed" ? "failed" : mission.status
 
     const { error: updateError } = await supabase
       .from("missions")
       .update({
         checks: nextChecks,
         photos: nextPhotos,
-        status: nextStatus,
+        status: dbStatus,
       })
       .eq("id", missionId)
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 400 })
+    }
+
+    // Resolve the pledge hold exactly once the mission's final outcome is
+    // known -- same release-on-success/capture-on-failure rule as GPS Check,
+    // both no-ops if already resolved.
+    if (dbStatus === "completed") {
+      try {
+        await releaseMissionPledgeHold(supabase, missionId, mission.creator_id)
+      } catch (pledgeError) {
+        console.error("[photo-ai] Pledge release failed", pledgeError)
+      }
+    } else if (dbStatus === "failed") {
+      try {
+        await captureMissionPledgeHold(supabase, missionId, mission.creator_id)
+      } catch (pledgeError) {
+        console.error("[photo-ai] Pledge capture failed", pledgeError)
+      }
     }
 
     const { error: eventError } = await supabase

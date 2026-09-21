@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
-import { requireSavedMissionPaymentMethod } from "@/lib/mission-payment"
+import { captureMissionPledgeHold, releaseMissionPledgeHold, requireSavedMissionPaymentMethod } from "@/lib/mission-payment"
 import type { Mission } from "@/lib/missions"
 
 export const dynamic = "force-dynamic"
@@ -159,6 +159,11 @@ export async function PATCH(request: Request) {
 	if (isLateStartAttempt) {
 		const { error: failError } = await context.client.from("missions").update({ status: "failed" }).eq("id", missionId).eq("creator_id", context.user.id)
 		if (failError) return NextResponse.json({ error: failError.message }, { status: 400 })
+		try {
+			await captureMissionPledgeHold(context.client, missionId, context.user.id)
+		} catch (pledgeError) {
+			console.error("[missions] Late-start pledge capture failed", pledgeError)
+		}
 		return NextResponse.json({ error: "Mission start deadline passed. The mission failed before it began." }, { status: 400 })
 	}
 
@@ -171,6 +176,24 @@ export async function PATCH(request: Request) {
 		.maybeSingle()
 	if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 	if (!updatedMission) return NextResponse.json({ error: "Mission update was not persisted. Check the authenticated creator RLS update policy." }, { status: 403 })
+
+	// Resolve the pledge hold exactly once the mission's final outcome is
+	// known — release (no money ever moves) on success, capture (real charge)
+	// on failure. Both helpers are no-ops if the hold was already resolved.
+	if (updatedMission.status === "completed") {
+		try {
+			await releaseMissionPledgeHold(context.client, missionId, context.user.id)
+		} catch (pledgeError) {
+			console.error("[missions] Pledge release failed", pledgeError)
+		}
+	} else if (updatedMission.status === "failed") {
+		try {
+			await captureMissionPledgeHold(context.client, missionId, context.user.id)
+		} catch (pledgeError) {
+			console.error("[missions] Pledge capture failed", pledgeError)
+		}
+	}
+
 	return NextResponse.json({ ok: true })
 }
 

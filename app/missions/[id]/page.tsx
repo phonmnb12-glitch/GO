@@ -153,6 +153,7 @@ export default function MissionDetail() {
   const [missionEvents, setMissionEvents] = useState<MissionEventRow[]>([])
   const [now, setNow] = useState(0)
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null)
+  const [isSubmittingGpsOutcome, setIsSubmittingGpsOutcome] = useState(false)
 
   useEffect(() => {
     if (!mission || mission.verificationType !== "GPS Check" || !navigator.geolocation) return
@@ -163,6 +164,63 @@ export default function MissionDetail() {
     )
     return () => navigator.geolocation.clearWatch(watchId)
   }, [mission])
+
+  // Real GPS check-in decision, wired to the actual API (unlike the
+  // standalone /gps-mission/[id] page, which only ever wrote to
+  // localStorage and was never reachable from the real mission-creation
+  // flow). Auto-fails once the mission window closes without a successful
+  // check-in, auto-completes the moment the live position is within 10m of
+  // the destination. PATCHing status to Completed/Failed here is also what
+  // triggers the pledge hold's release/capture server-side.
+  useEffect(() => {
+    if (!mission || !session) return
+    if (mission.verificationType !== "GPS Check") return
+    if (mission.status === "Completed" || mission.status === "Failed" || mission.status === "Cancelled") return
+    if (mission.gpsLatitude === undefined || mission.gpsLongitude === undefined) return
+    if (isSubmittingGpsOutcome) return
+
+    const nowMs = Date.now()
+    const startMs = new Date(mission.startTime).getTime()
+    const endMs = new Date(mission.endTime).getTime()
+    if (nowMs < startMs) return
+
+    const submitOutcome = async (payload: Record<string, unknown>) => {
+      setIsSubmittingGpsOutcome(true)
+      try {
+        await fetch(`/api/missions?id=${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify(payload),
+        })
+      } catch (error) {
+        console.error("[GPS Check] Failed to submit outcome", error)
+      } finally {
+        setIsSubmittingGpsOutcome(false)
+      }
+    }
+
+    if (nowMs > endMs) {
+      void submitOutcome({
+        status: "Failed",
+        gpsVerificationStatus: "Failed",
+        gpsFailureReason: "Check-in time expired before reaching the destination.",
+      })
+      return
+    }
+
+    if (!currentLocation) return
+    const distance = distanceBetween(currentLocation, { latitude: mission.gpsLatitude, longitude: mission.gpsLongitude })
+    if (distance > 10) return
+
+    void submitOutcome({
+      status: "Completed",
+      gpsCheckInAt: new Date(nowMs).toISOString(),
+      gpsCheckInLatitude: currentLocation.latitude,
+      gpsCheckInLongitude: currentLocation.longitude,
+      gpsCheckInDistance: distance,
+      gpsVerificationStatus: "Passed",
+    })
+  }, [mission, currentLocation, session, id, isSubmittingGpsOutcome])
 
   useEffect(() => {
     if (!session || authLoading) return

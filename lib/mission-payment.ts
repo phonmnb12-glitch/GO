@@ -200,6 +200,11 @@ export async function chargeMissionPledge({
   }
 
   try {
+    // capture_method: "manual" authorizes (holds) the card for this amount
+    // without moving any money yet — matches the spec's "Payment Intent /
+    // Card Authorization Hold" requirement. The hold is only ever resolved
+    // later by releaseMissionPledgeHold() (mission succeeds) or
+    // captureMissionPledgeHold() (mission fails), never here.
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInMinorUnits,
       currency: "thb",
@@ -208,7 +213,8 @@ export async function chargeMissionPledge({
       payment_method_types: ["card"],
       confirm: true,
       off_session: true,
-      description: `GO mission pledge: ${normalizedMissionName}`,
+      capture_method: "manual",
+      description: `GO mission pledge hold: ${normalizedMissionName}`,
       metadata: {
         user_id: user.id,
         mission_id: normalizedMissionId,
@@ -216,7 +222,7 @@ export async function chargeMissionPledge({
       },
     }, { idempotencyKey })
 
-    if (paymentIntent.status !== "succeeded") {
+    if (paymentIntent.status !== "requires_capture") {
       const paymentError = paymentIntent.last_payment_error ?? undefined
       throw Object.assign(new Error(paymentError?.message ?? "Payment confirmation is required before this mission can be marked paid."), {
         code: paymentError?.code ?? paymentIntent.status ?? "payment_required",
@@ -234,7 +240,7 @@ export async function chargeMissionPledge({
       mission_id: normalizedMissionId,
       amount: savedAmount,
       currency: "THB",
-      payment_status: "Paid",
+      payment_status: "Authorized",
       stripe_customer_id: stripeCustomerId,
       stripe_payment_intent_id: paymentIntent.id,
       created_at: new Date().toISOString(),
@@ -262,4 +268,77 @@ export async function chargeMissionPledge({
       paymentStatus: (error as { paymentStatus?: string })?.paymentStatus,
     })
   }
+}
+
+export type MissionPledgeResolutionResult = {
+  resolved: boolean
+  transactionId: string
+  paymentIntentId: string | null
+  paymentStatus: string | null
+}
+
+async function findMissionPledgeTransaction(supabaseClient: SupabaseClient, missionId: string, creatorId: string) {
+  const transactionId = `go_mission_pledge_${missionId}_${creatorId}`
+  const { data: transaction, error } = await supabaseClient
+    .from("transactions")
+    .select("transaction_id, stripe_payment_intent_id, payment_status")
+    .eq("transaction_id", transactionId)
+    .maybeSingle()
+
+  if (error) throw error
+  return { transactionId, transaction }
+}
+
+// Releases the authorization hold without ever moving money — called when a
+// mission's creator succeeds. Safe to call more than once: once the
+// transaction is no longer "Authorized" this is a silent no-op, so a mission
+// whose status flips (or a retry) never double-releases.
+export async function releaseMissionPledgeHold(
+  supabaseClient: SupabaseClient,
+  missionId: string,
+  creatorId: string,
+): Promise<MissionPledgeResolutionResult> {
+  const { transactionId, transaction } = await findMissionPledgeTransaction(supabaseClient, missionId, creatorId)
+  if (!transaction || transaction.payment_status !== "Authorized" || typeof transaction.stripe_payment_intent_id !== "string") {
+    return { resolved: false, transactionId, paymentIntentId: transaction?.stripe_payment_intent_id ?? null, paymentStatus: transaction?.payment_status ?? null }
+  }
+
+  const stripe = getStripe()
+  await stripe.paymentIntents.cancel(transaction.stripe_payment_intent_id)
+
+  const { error: updateError } = await supabaseClient
+    .from("transactions")
+    .update({ payment_status: "Returned" })
+    .eq("transaction_id", transactionId)
+  if (updateError) throw updateError
+
+  return { resolved: true, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Returned" }
+}
+
+// Captures the authorization hold (real money moves to the GO platform's
+// Stripe account) — called when a mission's creator fails. GO does not move
+// money on to a third party's own bank account (that needs Stripe Connect,
+// out of scope here); the chosen failed_destination/friend_recipient/
+// foundation_recipient/support_recipient columns remain the record of where
+// it was meant to go. Same double-capture guard as release, above.
+export async function captureMissionPledgeHold(
+  supabaseClient: SupabaseClient,
+  missionId: string,
+  creatorId: string,
+): Promise<MissionPledgeResolutionResult> {
+  const { transactionId, transaction } = await findMissionPledgeTransaction(supabaseClient, missionId, creatorId)
+  if (!transaction || transaction.payment_status !== "Authorized" || typeof transaction.stripe_payment_intent_id !== "string") {
+    return { resolved: false, transactionId, paymentIntentId: transaction?.stripe_payment_intent_id ?? null, paymentStatus: transaction?.payment_status ?? null }
+  }
+
+  const stripe = getStripe()
+  await stripe.paymentIntents.capture(transaction.stripe_payment_intent_id)
+
+  const { error: updateError } = await supabaseClient
+    .from("transactions")
+    .update({ payment_status: "Sent" })
+    .eq("transaction_id", transactionId)
+  if (updateError) throw updateError
+
+  return { resolved: true, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Sent" }
 }
