@@ -40,6 +40,15 @@ function StatCard({ title, value, i }: { title: string; value: React.ReactNode; 
   )
 }
 
+// Work Team and Timelapse Video each need their own dedicated page (real-time
+// camera/recording controls, group state, etc.) -- every other verification
+// type is fully served by the generic /missions/[id] detail page.
+function getMissionDetailPath(mission: Pick<Mission, "id" | "verificationType">) {
+  if (mission.verificationType === "Work Team") return `/work-team-mission/${mission.id}`
+  if (mission.verificationType === "Timelapse Video") return `/timelapse-mission/${mission.id}`
+  return `/missions/${mission.id}`
+}
+
 function MissionCard({ mission }: { mission: Mission }) {
   const router = useRouter()
   const [now, setNow] = useState(0)
@@ -79,7 +88,7 @@ function MissionCard({ mission }: { mission: Mission }) {
       animate={{ scale: 1, opacity: 1 }}
       transition={{ duration: 0.28 }}
       whileHover={{ y: -3 }}
-      onClick={() => router.push(mission.verificationType === "Work Team" ? `/work-team-mission/${mission.id}` : `/missions/${mission.id}`)}
+      onClick={() => router.push(getMissionDetailPath(mission))}
       className="card-strong relative cursor-pointer overflow-hidden border border-white/60 bg-white/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_12px_28px_rgba(18,18,18,0.06)] backdrop-blur-xl"
     >
       <div className="flex items-start justify-between gap-4 px-3">
@@ -100,7 +109,7 @@ function MissionCard({ mission }: { mission: Mission }) {
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            router.push(mission.verificationType === "Work Team" ? `/work-team-mission/${mission.id}` : `/missions/${mission.id}`)
+            router.push(getMissionDetailPath(mission))
           }}
           className="rounded-md bg-[#121212] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[#2a2a2a]"
         >
@@ -464,6 +473,7 @@ export default function DashboardPage() {
     title: mission.missionName,
     date: new Date(mission.startTime).toLocaleDateString("th-TH", { dateStyle: "medium" }),
     time: new Date(mission.startTime).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }),
+    detailPath: getMissionDetailPath(mission),
   }))
 
   const recentActivities = notificationsToShow.slice(0, 5)
@@ -627,7 +637,7 @@ export default function DashboardPage() {
                       <div className="mt-1 text-sm text-gray-500">{u.date} · {u.time}</div>
                       <div className="mt-3 flex justify-end">
                         <Link
-                          href={`/missions/${u.id}`}
+                          href={u.detailPath}
                           className="inline-flex items-center rounded-full bg-[#121212] px-3 py-1.5 text-[10px] font-semibold text-white shadow-sm transition hover:bg-[#2a2a2a]"
                         >
                           ดูรายละเอียด
