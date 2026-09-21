@@ -127,6 +127,10 @@ export default function TimelapseMissionPage() {
   const sentAiMessagesRef = useRef(new Set<string>())
 
   const [mission, setMission] = useState<Mission | null>(null)
+  // Distinguishes "still fetching" from "genuinely not found" -- without
+  // this, the not-found screen flashed on every load/refresh because
+  // `mission` starts null and the first fetch takes a moment to resolve.
+  const [hasLoadedMission, setHasLoadedMission] = useState(false)
   const [now, setNow] = useState(0)
   const [cameraFacing, setCameraFacing] = useState<CameraFacing>("environment")
   const [cameraState, setCameraState] = useState<"idle" | "opening" | "preview" | "recording" | "ready">("idle")
@@ -156,7 +160,10 @@ export default function TimelapseMissionPage() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const videoPanelRef = useRef<HTMLDivElement | null>(null)
 
-  const syncMission = async () => setMission(await getMissionFromSupabase(id))
+  const syncMission = async () => {
+    setMission(await getMissionFromSupabase(id))
+    setHasLoadedMission(true)
+  }
 
   const missionStartTime = mission ? new Date(mission.startTime).getTime() : 0
   const missionEndTime = mission ? new Date(mission.endTime).getTime() : 0
@@ -1018,6 +1025,15 @@ export default function TimelapseMissionPage() {
     }
   }
 
+  if (!mission && !hasLoadedMission) {
+    return (
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(175,255,0,0.12),_transparent_30%),linear-gradient(180deg,#f7f7f5_0%,#f2f4f6_100%)] text-[#121212]">
+        <DashboardNav />
+        <div className="mx-auto max-w-4xl px-6 py-16 text-sm text-gray-600">กำลังโหลดภารกิจ...</div>
+      </main>
+    )
+  }
+
   if (!mission) {
     return (
       <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(175,255,0,0.12),_transparent_30%),linear-gradient(180deg,#f7f7f5_0%,#f2f4f6_100%)] text-[#121212]">
@@ -1203,6 +1219,11 @@ onClick={() => {
                     onChange={(event) => {
                       const nextFacing = event.target.value as CameraFacing
                       setCameraFacing(nextFacing)
+                      // openCamera() reuses streamRef.current when one is
+                      // already open (to avoid re-prompting for permission on
+                      // unrelated re-renders), so without stopping it first,
+                      // switching cameras just kept the old stream forever.
+                      stopCamera()
                       void openCamera(nextFacing)
                     }}
                     className="rounded-full border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none"
