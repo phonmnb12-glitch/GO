@@ -62,7 +62,13 @@ function MissionCard({ mission }: { mission: Mission }) {
   const isGpsFinalWindow = mission.verificationType === "GPS Check"
     && now >= new Date(mission.endTime).getTime() - 30 * 60 * 1000
     && now < new Date(mission.endTime).getTime()
-  const displayedAsActive = mission.status === "In Progress" || isGpsFinalWindow
+  // A group mission still waiting on invites must never read as active no
+  // matter what the time-window heuristics below say -- GPS Check's own
+  // "final 30 minutes" window is purely clock-based and doesn't know about
+  // acceptance state, so without this a mission stuck in Waiting for
+  // Members could still show as "กำลังดำเนินการ" once close to its end time.
+  const isWaitingForMembers = mission.missionType === "Group" && mission.groupMissionLifecycle === "Waiting for Members"
+  const displayedAsActive = !isWaitingForMembers && (mission.status === "In Progress" || isGpsFinalWindow)
   const timeRemaining = (() => {
     const start = new Date(mission.startTime).getTime()
     const end = new Date(mission.endTime).getTime()
@@ -407,16 +413,25 @@ export default function DashboardPage() {
   const isGpsInFinalWindow = (mission: Mission) => isGpsBeforeEnd(mission)
     && now >= new Date(mission.endTime).getTime() - 30 * 60 * 1000
   const isVisibleGroupMission = (mission: Mission) => mission.missionType !== "Group" || mission.groupMissionLifecycle !== "Cancelled"
+  // GPS Check's own bucket rules are purely clock-based (a wide "any time
+  // before end" window plus a "final 30 minutes" carve-out) and never
+  // checked group-acceptance state, so a mission still waiting on invites
+  // could still land in the active bucket once close to its end time. This
+  // keeps it pinned to Upcoming until everyone has actually accepted.
+  const isWaitingForMembers = (mission: Mission) => mission.missionType === "Group" && mission.groupMissionLifecycle === "Waiting for Members"
   const inProgressMissions = missions.filter((mission) =>
-    isVisibleGroupMission(mission) && (
+    isVisibleGroupMission(mission) && !isWaitingForMembers(mission) && (
       mission.status === "In Progress" && mission.verificationType !== "GPS Check"
       || isGpsInFinalWindow(mission)
     ),
   )
   const upcomingMissions = missions.filter((mission) =>
-    isVisibleGroupMission(mission) && (mission.verificationType === "GPS Check"
-      ? isGpsBeforeEnd(mission) && !isGpsInFinalWindow(mission)
-      : mission.status === "Upcoming"),
+    isVisibleGroupMission(mission) && (
+      isWaitingForMembers(mission)
+      || (mission.verificationType === "GPS Check"
+        ? isGpsBeforeEnd(mission) && !isGpsInFinalWindow(mission)
+        : mission.status === "Upcoming")
+    ),
   )
   const completedMissions = missions.filter((mission) => mission.status === "Completed")
 
