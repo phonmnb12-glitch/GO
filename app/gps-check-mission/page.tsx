@@ -213,8 +213,15 @@ export default function GPSCheckMissionPage() {
       return
     }
 
-    const options: PositionOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+    // Desktops have no GPS chip, so a high-accuracy-only request can never
+    // resolve there -- it just times out and (before this fix) retried the
+    // same impossible request forever. Give a couple of attempts a real GPS
+    // fix (for phones), then fall back to coarser network/WiFi-based
+    // positioning, which is what desktops actually rely on.
+    let attempt = 0
     const requestLocation = () => {
+      attempt += 1
+      const options: PositionOptions = { enableHighAccuracy: attempt <= 2, maximumAge: 0, timeout: 20000 }
       setSearchMessage("Getting your current location…")
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -229,11 +236,13 @@ export default function GPSCheckMissionPage() {
           console.error("[GPS] Geolocation error", { code: error.code, message: error.message, error })
           if (error.code === error.PERMISSION_DENIED) {
             setSearchMessage("Location permission is blocked for this site.")
-          } else if (error.code === error.POSITION_UNAVAILABLE) {
-            setSearchMessage("Your current location is temporarily unavailable.")
-          } else if (error.code === error.TIMEOUT) {
-            setSearchMessage("Location detection timed out. Trying again…")
-            window.setTimeout(requestLocation, 1500)
+          } else if (error.code === error.TIMEOUT || error.code === error.POSITION_UNAVAILABLE) {
+            if (attempt < 4) {
+              setSearchMessage("Location detection timed out. Trying again…")
+              window.setTimeout(requestLocation, 1500)
+            } else {
+              setSearchMessage("Unable to detect your location. Please search for it instead.")
+            }
           } else {
             setSearchMessage("Unable to access your current location.")
           }
