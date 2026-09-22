@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useParams } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 
-type Mission = { id: string; name: string; description: string; category: string; start_time: string; end_time: string; pledge_amount: number; status: string }
+type Mission = { id: string; creator_id: string; name: string; description: string; category: string; start_time: string; end_time: string; pledge_amount: number; status: string }
 type Submission = { percent: number; reason: string; photo: string; submittedAt: string }
 type Member = { user_id: string; role: string; status: string; payment_status: string; completed_at?: string; failed_at?: string; assigned_task?: string | null; profile?: { name?: string; friend_id?: string } | null; submission?: Submission | null; confirmedBy?: string[] }
 type Payload = { mission?: Mission; members?: Member[]; viewerId?: string; error?: string }
@@ -123,6 +123,7 @@ export default function WorkTeamMissionDetailPage() {
     return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`
   }, [remaining])
   const viewer = members.find((member) => member.user_id === payload.viewerId)
+  const isLeader = Boolean(mission && payload.viewerId && mission.creator_id === payload.viewerId)
 
   if (!mission) return <main className="min-h-screen bg-[#f5f5f3] text-[#111111]"><DashboardNav /><div className="mx-auto max-w-4xl px-6 py-16"><h1 className="text-2xl font-bold">ภารกิจทีมงาน</h1><p className="mt-2 text-sm text-gray-600">{errorMessage || "กำลังโหลดภารกิจ..."}</p></div></main>
 
@@ -145,7 +146,6 @@ export default function WorkTeamMissionDetailPage() {
           <div className="mt-5 grid gap-3 md:grid-cols-2">
             {members.map((member) => {
               const isViewer = member.user_id === payload.viewerId
-              const alreadyConfirmedByViewer = (member.confirmedBy ?? []).includes(payload.viewerId ?? "")
               return (
                 <div key={member.user_id} className="rounded-2xl border border-[#111111]/10 bg-[#f7f7f5] p-4">
                   <div className="flex items-center justify-between gap-3">
@@ -166,11 +166,11 @@ export default function WorkTeamMissionDetailPage() {
                           <div className="mt-0.5 whitespace-pre-line break-words text-xs text-[#6b6b6b]">{member.submission.reason}</div>
                         </div>
                       </div>
-                      {!isViewer && member.status !== "completed" && (
+                      {isLeader && !isViewer && member.status !== "completed" && (
                         <div className="mt-3 flex gap-2">
                           <button
                             type="button"
-                            disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
+                            disabled={confirmingId === member.user_id}
                             onClick={() => void confirmWork(member.user_id, "reject")}
                             className="flex-1 rounded-full border border-[#111111]/15 bg-white px-4 py-2 text-xs font-semibold text-[#111111] disabled:cursor-not-allowed disabled:opacity-50"
                           >
@@ -178,11 +178,11 @@ export default function WorkTeamMissionDetailPage() {
                           </button>
                           <button
                             type="button"
-                            disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
+                            disabled={confirmingId === member.user_id}
                             onClick={() => void confirmWork(member.user_id, "confirm")}
                             className="flex-1 rounded-full bg-[#AFFF00] px-4 py-2 text-xs font-semibold text-[#121212] disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {alreadyConfirmedByViewer ? "ยืนยันแล้ว" : confirmingId === member.user_id ? "กำลังส่ง..." : "ยืนยันงานนี้"}
+                            {confirmingId === member.user_id ? "กำลังส่ง..." : "ยืนยันงานนี้"}
                           </button>
                         </div>
                       )}

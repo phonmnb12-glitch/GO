@@ -186,6 +186,8 @@ export async function POST(request: Request) {
     pledgeAmount?: number
     friendIds?: string[]
     failedDestination?: string
+    foundationRecipient?: string
+    supportRecipient?: string
     friendTasks?: Record<string, string>
   }
   if (!body.name || !body.startTime || !body.endTime || !Array.isArray(body.friendIds)) {
@@ -264,6 +266,8 @@ export async function POST(request: Request) {
     invited_user_ids: invitedUserIds,
     failure_destination: body.failedDestination ?? "return-to-friends",
     invited_user_tasks: invitedUserTasks,
+    foundation_recipient: body.foundationRecipient ?? null,
+    support_recipient: body.supportRecipient ?? null,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ missionId: data }, { status: 201 })

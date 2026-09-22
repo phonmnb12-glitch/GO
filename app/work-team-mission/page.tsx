@@ -107,6 +107,9 @@ export default function WorkTeamMissionPage() {
   const startTime = `${startDate}T${startTimeStr}`
   const endTime = `${endDate}T${endTimeStr}`
   const [pledgeAmount, setPledgeAmount] = useState("10")
+  const [failedDestination, setFailedDestination] = useState("return-to-friends")
+  const [foundationRecipient, setFoundationRecipient] = useState("มูลนิธิ A")
+  const [supportRecipient, setSupportRecipient] = useState("GO Support Fund")
   const [errorMessage, setErrorMessage] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -151,7 +154,19 @@ export default function WorkTeamMissionPage() {
       const response = await fetch("/api/work-team", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ name: missionName, description, category, startTime: new Date(startTime).toISOString(), endTime: new Date(endTime).toISOString(), pledgeAmount: Number(pledgeAmount), friendIds: selectedFriends, friendTasks }),
+        body: JSON.stringify({
+          name: missionName,
+          description,
+          category,
+          startTime: new Date(startTime).toISOString(),
+          endTime: new Date(endTime).toISOString(),
+          pledgeAmount: Number(pledgeAmount),
+          friendIds: selectedFriends,
+          friendTasks,
+          failedDestination,
+          foundationRecipient: failedDestination === "donate-to-foundation" ? foundationRecipient : undefined,
+          supportRecipient: failedDestination === "support" ? supportRecipient : undefined,
+        }),
       })
       const result = await response.json() as { missionId?: string; error?: string }
       if (!response.ok || !result.missionId) throw new Error(result.error ?? "Unable to create Work Team mission.")
@@ -229,6 +244,42 @@ export default function WorkTeamMissionPage() {
                 })}
               </div>
             )}
+          </div>
+
+          <div className="mt-6">
+            <h3 className="text-lg font-semibold text-[#121212]">หากภารกิจล้มเหลว</h3>
+            <p className="mt-1 text-xs text-gray-600">เลือกปลายทางเงินมัดจำของคนที่ทำภารกิจไม่สำเร็จ</p>
+            <div className="mt-3 space-y-3">
+              {[["return-to-friends", "หารให้เพื่อนในกลุ่ม"], ["donate-to-foundation", "บริจาคมูลนิธิ"], ["support", "สนับสนุน go."]].map(([value, label]) => (
+                <div key={value} className={`rounded-xl border-2 bg-[#f9f9f8] p-3 transition ${failedDestination === value ? "border-[#AFFF00] bg-[#AFFF00]/10" : "border-[#121212]/10 hover:border-[#AFFF00]/40"}`}>
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input type="radio" name="work-team-failed-destination" checked={failedDestination === value} onChange={() => setFailedDestination(value)} className="h-4 w-4" />
+                    <span className="text-sm font-medium text-[#121212]">{label}</span>
+                  </label>
+                  {value === "return-to-friends" && failedDestination === "return-to-friends" && (
+                    <p className="mt-2 border-t border-[#121212]/10 pt-2 text-xs text-gray-600">เงินมัดจำของคนที่ไม่ผ่านจะถูกหารเท่าๆ กันให้เพื่อนในทีมที่ทำสำเร็จ</p>
+                  )}
+                  {value === "donate-to-foundation" && failedDestination === "donate-to-foundation" && (
+                    <div className="mt-3 space-y-2 border-t border-[#121212]/10 pt-3">
+                      {["มูลนิธิ A", "มูลนิธิ B", "มูลนิธิ C"].map((foundation) => (
+                        <button key={foundation} type="button" onClick={() => setFoundationRecipient(foundation)} className={`flex w-full items-center justify-between rounded-xl border p-3 text-left transition ${foundationRecipient === foundation ? "border-[#AFFF00] bg-[#AFFF00]/15" : "border-[#121212]/10 bg-white hover:border-[#AFFF00]/40"}`}>
+                          <span className="text-sm font-medium text-[#121212]">{foundation}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {value === "support" && failedDestination === "support" && (
+                    <div className="mt-3 space-y-2 border-t border-[#121212]/10 pt-3">
+                      {["GO Support Fund", "GO Community Support"].map((support) => (
+                        <button key={support} type="button" onClick={() => setSupportRecipient(support)} className={`flex w-full items-center justify-between rounded-xl border p-3 text-left transition ${supportRecipient === support ? "border-[#AFFF00] bg-[#AFFF00]/15" : "border-[#121212]/10 bg-white hover:border-[#AFFF00]/40"}`}>
+                          <span className="text-sm font-medium text-[#121212]">{support}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {errorMessage && <p className="mt-5 text-sm text-red-600">{errorMessage}</p>}
