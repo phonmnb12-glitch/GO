@@ -70,6 +70,7 @@ export async function GET(request: Request) {
       "group_invitation", "member_accepted", "member_declined", "group_mission_ready",
       "group_mission_cancelled", "group_mission_started", "member_failed",
       "group_mission_completed", "member_completed", "work_submitted", "work_confirmed_complete",
+      "pledge_split",
     ])
 
     const fallbackNotifications = (eventRows ?? [])
