@@ -1,7 +1,8 @@
-import { createClient } from "@supabase/supabase-js"
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
 import { requireSavedMissionPaymentMethod } from "@/lib/mission-payment"
+import { resolveGroupPledges } from "@/lib/work-team-pledges"
 
 export const dynamic = "force-dynamic"
 
@@ -16,10 +17,46 @@ const getClient = async (request: Request) => {
   return { client, user }
 }
 
+// Group missions (Work Team and Group GPS Check, which shares this same
+// route) only got resolved past their end_time when someone happened to
+// reopen that SPECIFIC mission's own detail page -- there's no background
+// cron actually wired up on Railway (the vercel.json cron entry is inert
+// off Vercel), so a mission nobody revisited just sat unresolved forever:
+// no pledge capture/release, and critically no pledge-split notification
+// for the teammates who did finish. Sweeping the caller's own expired
+// missions here means it now also fires from any dashboard/notifications
+// load, not just that one mission's page.
+async function resolveExpiredGroupMissions(client: SupabaseClient, userId: string) {
+  const { data: memberships } = await client
+    .from("mission_members")
+    .select("mission_id")
+    .eq("user_id", userId)
+  const missionIds = [...new Set((memberships ?? []).map((membership) => membership.mission_id).filter(Boolean))]
+  if (!missionIds.length) return
+
+  const { data: expiredMissions } = await client
+    .from("missions")
+    .select("id")
+    .in("id", missionIds)
+    .in("mission_type", ["work_team", "group"])
+    .in("status", ["upcoming", "in_progress"])
+    .lt("end_time", new Date().toISOString())
+
+  for (const mission of expiredMissions ?? []) {
+    try {
+      await client.rpc("sync_work_team_mission", { target_mission_id: mission.id })
+      await resolveGroupPledges(mission.id)
+    } catch (error) {
+      console.error("[work-team] Failed to resolve expired mission", mission.id, error)
+    }
+  }
+}
+
 export async function GET(request: Request) {
   const context = await getClient(request)
   if (!context) return NextResponse.json({ error: "Authentication is required." }, { status: 401 })
   const { client, user } = context
+  await resolveExpiredGroupMissions(client, user.id)
   const url = new URL(request.url)
 
   if (url.searchParams.get("notifications") === "1") {
