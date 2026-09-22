@@ -171,14 +171,6 @@ export default function WorkTeamMissionDetailPage() {
                           <button
                             type="button"
                             disabled={confirmingId === member.user_id}
-                            onClick={() => void confirmWork(member.user_id, "reject")}
-                            className="flex-1 rounded-full border border-[#111111]/15 bg-white px-4 py-2 text-xs font-semibold text-[#111111] disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            ไม่ยืนยัน
-                          </button>
-                          <button
-                            type="button"
-                            disabled={confirmingId === member.user_id}
                             onClick={() => void confirmWork(member.user_id, "confirm")}
                             className="flex-1 rounded-full bg-[#AFFF00] px-4 py-2 text-xs font-semibold text-[#121212] disabled:cursor-not-allowed disabled:opacity-50"
                           >

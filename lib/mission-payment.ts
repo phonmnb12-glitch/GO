@@ -432,6 +432,22 @@ export async function releaseMissionPledgeHold(
     return { resolved: false, transactionId, paymentIntentId: transaction?.stripe_payment_intent_id ?? null, paymentStatus: transaction?.payment_status ?? null }
   }
 
+  // Claim the row atomically (conditional UPDATE) before touching Stripe --
+  // two concurrent callers (e.g. the dashboard's parallel /api/work-team and
+  // /api/work-team?notifications=1 requests both sweeping the same expired
+  // mission) would otherwise both read "Authorized" above and both proceed.
+  // Only the caller whose UPDATE actually flips a row is the real resolver.
+  const { data: claimed, error: claimError } = await supabaseClient
+    .from("transactions")
+    .update({ payment_status: "Returned" })
+    .eq("transaction_id", transactionId)
+    .eq("payment_status", "Authorized")
+    .select("transaction_id")
+  if (claimError) throw claimError
+  if (!claimed || claimed.length === 0) {
+    return { resolved: false, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Returned" }
+  }
+
   const stripe = getStripe()
   try {
     await stripe.paymentIntents.cancel(transaction.stripe_payment_intent_id)
@@ -439,17 +455,11 @@ export async function releaseMissionPledgeHold(
     // A concurrent call can win this race first (e.g. two checkpoint
     // resolutions firing close together) -- Stripe itself already refuses to
     // move money twice, so this specific error just means the hold is
-    // already in its terminal state. Reconcile our own record to match
-    // instead of leaving it stuck on "Authorized" forever.
+    // already in its terminal state. Our own row is already claimed above,
+    // so there's nothing left to reconcile here.
     const isAlreadyResolved = error instanceof Error && "code" in error && (error as { code?: string }).code === "payment_intent_unexpected_state"
     if (!isAlreadyResolved) throw error
   }
-
-  const { error: updateError } = await supabaseClient
-    .from("transactions")
-    .update({ payment_status: "Returned" })
-    .eq("transaction_id", transactionId)
-  if (updateError) throw updateError
 
   return { resolved: true, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Returned" }
 }
@@ -470,22 +480,35 @@ export async function captureMissionPledgeHold(
     return { resolved: false, transactionId, paymentIntentId: transaction?.stripe_payment_intent_id ?? null, paymentStatus: transaction?.payment_status ?? null }
   }
 
+  // Claim the row atomically (conditional UPDATE) before touching Stripe or
+  // any downstream side effect -- splitFailedPledgeAmongTeam chains off
+  // `resolved` below, so without this, two concurrent callers (e.g. the
+  // dashboard's parallel /api/work-team and /api/work-team?notifications=1
+  // requests both sweeping the same expired mission) would both read
+  // "Authorized" above and both go on to split/notify, producing duplicate
+  // "you got a share of the forfeited pledge" notifications. Only the
+  // caller whose UPDATE actually flips a row is the real resolver.
+  const { data: claimed, error: claimError } = await supabaseClient
+    .from("transactions")
+    .update({ payment_status: "Sent" })
+    .eq("transaction_id", transactionId)
+    .eq("payment_status", "Authorized")
+    .select("transaction_id")
+  if (claimError) throw claimError
+  if (!claimed || claimed.length === 0) {
+    return { resolved: false, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Sent" }
+  }
+
   const stripe = getStripe()
   try {
     await stripe.paymentIntents.capture(transaction.stripe_payment_intent_id)
   } catch (error) {
     // Same race as releaseMissionPledgeHold: a concurrent call can already
-    // have captured this hold, so reconcile instead of leaving the row
-    // stuck on "Authorized" despite Stripe already having resolved it.
+    // have captured this hold. Our own row is already claimed above, so
+    // there's nothing left to reconcile here.
     const isAlreadyResolved = error instanceof Error && "code" in error && (error as { code?: string }).code === "payment_intent_unexpected_state"
     if (!isAlreadyResolved) throw error
   }
-
-  const { error: updateError } = await supabaseClient
-    .from("transactions")
-    .update({ payment_status: "Sent" })
-    .eq("transaction_id", transactionId)
-  if (updateError) throw updateError
 
   return { resolved: true, transactionId, paymentIntentId: transaction.stripe_payment_intent_id, paymentStatus: "Sent" }
 }

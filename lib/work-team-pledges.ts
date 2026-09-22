@@ -23,6 +23,18 @@ async function splitFailedPledgeAmongTeam(
     .maybeSingle()
   if (!mission || mission.failed_destination !== "return-to-friends") return
 
+  // Belt-and-suspenders against the same failed member being split twice
+  // (captureMissionPledgeHold's own atomic claim is the primary guard, but
+  // this stays cheap insurance against any other path that might call in).
+  const { data: existingSplit } = await admin
+    .from("mission_events")
+    .select("id")
+    .eq("mission_id", missionId)
+    .eq("user_id", failedUserId)
+    .eq("event_type", "pledge_split")
+    .maybeSingle()
+  if (existingSplit) return
+
   const { data: allMembers } = await admin
     .from("mission_members")
     .select("user_id, status")
