@@ -186,6 +186,7 @@ export async function POST(request: Request) {
     pledgeAmount?: number
     friendIds?: string[]
     failedDestination?: string
+    friendTasks?: Record<string, string>
   }
   if (!body.name || !body.startTime || !body.endTime || !Array.isArray(body.friendIds)) {
     return NextResponse.json({ error: "Mission name, time, and friends are required." }, { status: 400 })
@@ -238,6 +239,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "One or more selected friends are not accepted friends." }, { status: 400 })
   }
 
+  if (new Date(body.startTime).getTime() <= Date.now()) {
+    return NextResponse.json({ error: "Start time must be in the future." }, { status: 400 })
+  }
+
+  // friendTasks is keyed by whatever id the client picked the friend with
+  // (friend_id or user_id) -- re-key it by the resolved user_id so it lines
+  // up with invited_user_ids for the RPC.
+  const invitedUserTasks: Record<string, string> = {}
+  if (body.friendTasks) {
+    for (const [friendKey, task] of Object.entries(body.friendTasks)) {
+      const userId = friendIdToUserId.get(friendKey)
+      if (userId && task.trim()) invitedUserTasks[userId] = task.trim()
+    }
+  }
+
   const { data, error } = await context.client.rpc("create_work_team_mission", {
     mission_name: body.name.trim(),
     mission_description: body.description?.trim() ?? "",
@@ -247,6 +263,7 @@ export async function POST(request: Request) {
     mission_pledge: Number(body.pledgeAmount ?? 0),
     invited_user_ids: invitedUserIds,
     failure_destination: body.failedDestination ?? "return-to-friends",
+    invited_user_tasks: invitedUserTasks,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ missionId: data }, { status: 201 })

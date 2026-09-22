@@ -59,7 +59,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const { data: membership, error: membershipError } = await auth.client
     .from("mission_members")
-    .select("user_id, status")
+    .select("user_id, status, assigned_task")
     .eq("mission_id", missionId)
     .eq("user_id", auth.user.id)
     .maybeSingle()
@@ -94,7 +94,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         {
           role: "user",
           content: [
-            { type: "text", text: `Assignment name: ${mission.name}\nAssignment/subject: ${mission.category}\nDescription: ${mission.description || "No additional description."}\n\nEvaluate this submitted photo against the assignment above.` },
+            { type: "text", text: `Assignment name: ${mission.name}\nAssignment/subject: ${mission.category}\nDescription: ${mission.description || "No additional description."}${membership.assigned_task ? `\nThis specific team member's assigned task: ${membership.assigned_task}` : ""}\n\nEvaluate this submitted photo against ${membership.assigned_task ? "this member's own assigned task above" : "the assignment above"}.` },
             { type: "image_url", image_url: { url: imageData, detail: "low" } },
           ],
         },

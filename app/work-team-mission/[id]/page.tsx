@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 type Mission = { id: string; name: string; description: string; category: string; start_time: string; end_time: string; pledge_amount: number; status: string }
 type Submission = { percent: number; reason: string; photo: string; submittedAt: string }
-type Member = { user_id: string; role: string; status: string; payment_status: string; completed_at?: string; failed_at?: string; profile?: { name?: string; friend_id?: string } | null; submission?: Submission | null; confirmedBy?: string[] }
+type Member = { user_id: string; role: string; status: string; payment_status: string; completed_at?: string; failed_at?: string; assigned_task?: string | null; profile?: { name?: string; friend_id?: string } | null; submission?: Submission | null; confirmedBy?: string[] }
 type Payload = { mission?: Mission; members?: Member[]; viewerId?: string; error?: string }
 
 const statusClasses: Record<string, string> = {
@@ -152,6 +152,7 @@ export default function WorkTeamMissionDetailPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{member.profile?.name ?? member.user_id}{isViewer && " (คุณ)"}</div>
                       <div className="mt-1 truncate text-xs text-[#6b6b6b]">{member.profile?.friend_id ?? member.user_id}</div>
+                      {member.assigned_task && <div className="mt-1 text-xs font-medium text-[#8bbf00]">งาน: {member.assigned_task}</div>}
                     </div>
                     <span className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses[member.status] ?? "border-gray-200 bg-white text-gray-700"}`}>{labelStatus(member.status)}</span>
                   </div>
