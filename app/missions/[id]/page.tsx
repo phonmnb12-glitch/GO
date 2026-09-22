@@ -244,11 +244,7 @@ export default function MissionDetail() {
 
     if (!currentLocation) return
     const distance = distanceBetween(currentLocation, { latitude: mission.gpsLatitude, longitude: mission.gpsLongitude })
-    // Group GPS Check gets a wider radius than solo -- everyone in the
-    // group has to independently land within it near the same time, which
-    // is harder than one person doing it alone.
-    const requiredRadius = isGroup ? 20 : 10
-    if (distance > requiredRadius) return
+    if (distance > 20) return
 
     void submitOutcome({
       status: "Completed",
@@ -324,7 +320,7 @@ export default function MissionDetail() {
     if (!currentLocation) return "Waiting for Location"
     if (now < new Date(mission.startTime).getTime()) return "Waiting for Check-in Time"
     if (now > new Date(mission.endTime).getTime()) return "Mission time has expired."
-    if ((gpsDistance ?? Infinity) > (mission.missionType === "Group" ? 20 : 10)) return `${Math.round(gpsDistance ?? 0)} m away. Move closer to the destination.`
+    if ((gpsDistance ?? Infinity) > 20) return `${Math.round(gpsDistance ?? 0)} m away. Move closer to the destination.`
     return "Destination reached. Verifying automatically..."
   }, [currentLocation, gpsDistance, mission, now])
 
@@ -564,7 +560,7 @@ export default function MissionDetail() {
               <div className="mt-1 text-sm text-[#5d5d5d]">{mission.gpsDestinationAddress ?? "ไม่มีที่อยู่ปลายทาง"}</div>
               <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                 <div><span className="text-[#6b6b6b]">ระยะทาง</span><div className="mt-1 font-semibold">{gpsDistance === undefined ? "กำลังรอพิกัด" : `${Math.round(gpsDistance)} ม.`}</div></div>
-                <div><span className="text-[#6b6b6b]">รัศมีที่ต้องใช้</span><div className="mt-1 font-semibold">10 เมตร</div></div>
+                <div><span className="text-[#6b6b6b]">รัศมีที่ต้องใช้</span><div className="mt-1 font-semibold">20 เมตร</div></div>
                 <div><span className="text-[#6b6b6b]">สถานะเช็กอิน</span><div className="mt-1 font-semibold">{mission.gpsVerificationStatus ?? "รอดำเนินการ"}</div></div>
                 <div><span className="text-[#6b6b6b]">เวลาสิ้นสุดที่กำหนด</span><div className="mt-1 font-semibold">{formatTime(mission.endTime)}</div></div>
                 <div><span className="text-[#6b6b6b]">พิกัดปลายทาง</span><div className="mt-1 font-semibold">{mission.gpsLatitude ?? "—"}, {mission.gpsLongitude ?? "—"}</div></div>
@@ -828,7 +824,7 @@ export default function MissionDetail() {
                     <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                       <div><span className="text-[#6b6b6b]">จุดหมาย</span><div className="mt-1 font-semibold">{mission.gpsDestinationName ?? "—"}</div></div>
                       <div><span className="text-[#6b6b6b]">ระยะทาง</span><div className="mt-1 font-semibold">{currentLocation && mission.gpsLatitude !== undefined && mission.gpsLongitude !== undefined ? `${Math.round(distanceBetween(currentLocation, { latitude: mission.gpsLatitude, longitude: mission.gpsLongitude }))} ม.` : "กำลังรอพิกัด"}</div></div>
-                      <div><span className="text-[#6b6b6b]">รัศมีที่ต้องใช้</span><div className="mt-1 font-semibold">{mission.missionType === "Group" ? "20 เมตร" : "10 เมตร"}</div></div>
+                      <div><span className="text-[#6b6b6b]">รัศมีที่ต้องใช้</span><div className="mt-1 font-semibold">20 เมตร</div></div>
                       <div><span className="text-[#6b6b6b]">เช็กอิน</span><div className="mt-1 font-semibold">อัตโนมัติ</div></div>
                     </div>
                   </div>
