@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
 import { captureMissionPledgeHold, releaseMissionPledgeHold, requireSavedMissionPaymentMethod } from "@/lib/mission-payment"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import type { Mission } from "@/lib/missions"
 
 export const dynamic = "force-dynamic"
@@ -127,7 +128,14 @@ export async function POST(request: Request) {
 
 	if (isGatedGroupMission) {
 		const pendingMemberIds = members.filter((member) => member.role === "member").map((member) => member.user_id)
-		const { error: invitationNotificationError } = await context.client.from("notifications").insert(
+		// Inserting a notification for someone OTHER than the caller (the
+		// invited friend, not the creator) is blocked by the "insert own
+		// notifications" RLS policy under the caller's own client -- it
+		// failed silently every time (only console.warn'd, mission creation
+		// still returned success), so no invitee ever actually got notified.
+		// Same fix as the other cross-user notification inserts elsewhere:
+		// use the service-role admin client for this one insert.
+		const { error: invitationNotificationError } = await getSupabaseAdmin().from("notifications").insert(
 			pendingMemberIds.map((userId) => ({
 				user_id: userId,
 				mission_id: mission.id,
