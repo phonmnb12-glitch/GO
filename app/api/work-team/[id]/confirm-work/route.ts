@@ -30,8 +30,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const auth = await getClient(request)
   if (!auth) return NextResponse.json({ error: "Authentication is required." }, { status: 401 })
   const { id: missionId } = await context.params
-  const body = await request.json().catch(() => ({})) as { targetMemberId?: string }
+  const body = await request.json().catch(() => ({})) as { targetMemberId?: string; decision?: "confirm" | "reject" }
   const targetMemberId = body.targetMemberId
+  const decision = body.decision === "reject" ? "reject" : "confirm"
   if (!targetMemberId) return NextResponse.json({ error: "targetMemberId is required." }, { status: 400 })
   if (targetMemberId === auth.user.id) return NextResponse.json({ error: "You cannot confirm your own submission." }, { status: 400 })
 
@@ -43,6 +44,32 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     .maybeSingle()
   if (confirmerError) return NextResponse.json({ error: confirmerError.message }, { status: 400 })
   if (!confirmerMembership) return NextResponse.json({ error: "Mission access denied." }, { status: 403 })
+
+  if (decision === "reject") {
+    // A peer rejecting a submission doesn't fail the mission outright --
+    // it just tells the submitter their photo didn't cut it so they can
+    // retake and resubmit before the deadline (submit-work already
+    // supports resubmitting; the GET handler always shows each member's
+    // latest submission). No mission_members status change here.
+    const { error: rejectEventError } = await auth.client.rpc("record_mission_event", {
+      target_mission_id: missionId,
+      target_event_type: "work_rejected",
+      target_payload: { target_member_id: targetMemberId },
+    })
+    if (rejectEventError) return NextResponse.json({ error: rejectEventError.message }, { status: 400 })
+
+    const admin = getSupabaseAdmin()
+    const { data: rejecterProfile } = await admin.from("profiles").select("name").eq("user_id", auth.user.id).maybeSingle()
+    await admin.from("notifications").insert({
+      user_id: targetMemberId,
+      mission_id: missionId,
+      event_type: "work_rejected",
+      title: "งานของคุณยังไม่ผ่านการยืนยัน",
+      description: `${rejecterProfile?.name ?? "เพื่อนในทีม"} ไม่ยืนยันงานที่ส่งไป ลองถ่ายรูปส่งใหม่อีกครั้งก่อนหมดเวลา`,
+    })
+
+    return NextResponse.json({ ok: true, targetMemberId, decision: "reject" })
+  }
 
   const { error: eventError } = await auth.client.rpc("record_mission_event", {
     target_mission_id: missionId,

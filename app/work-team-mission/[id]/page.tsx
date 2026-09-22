@@ -92,7 +92,7 @@ export default function WorkTeamMissionDetailPage() {
     }
   }
 
-  const confirmWork = async (targetMemberId: string) => {
+  const confirmWork = async (targetMemberId: string, decision: "confirm" | "reject" = "confirm") => {
     setConfirmingId(targetMemberId)
     setErrorMessage("")
     try {
@@ -101,7 +101,7 @@ export default function WorkTeamMissionDetailPage() {
       const response = await fetch(`/api/work-team/${params.id}/confirm-work`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ targetMemberId }),
+        body: JSON.stringify({ targetMemberId, decision }),
       })
       const result = await response.json() as { error?: string }
       if (!response.ok) throw new Error(result.error ?? "Unable to confirm work.")
@@ -158,23 +158,33 @@ export default function WorkTeamMissionDetailPage() {
                   </div>
                   {member.submission && (
                     <div className="mt-3 rounded-xl border border-[#111111]/10 bg-white p-3">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start gap-3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={member.submission.photo} alt="งานที่ส่ง" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-bold text-[#111111]">ตรงกับงาน {member.submission.percent}%</div>
-                          <div className="truncate text-xs text-[#6b6b6b]">{member.submission.reason}</div>
+                          <div className="mt-0.5 whitespace-pre-line break-words text-xs text-[#6b6b6b]">{member.submission.reason}</div>
                         </div>
                       </div>
                       {!isViewer && member.status !== "completed" && (
-                        <button
-                          type="button"
-                          disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
-                          onClick={() => void confirmWork(member.user_id)}
-                          className="mt-3 w-full rounded-full bg-[#AFFF00] px-4 py-2 text-xs font-semibold text-[#121212] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {alreadyConfirmedByViewer ? "ยืนยันแล้ว" : confirmingId === member.user_id ? "กำลังยืนยัน..." : "ยืนยันงานนี้"}
-                        </button>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
+                            onClick={() => void confirmWork(member.user_id, "reject")}
+                            className="flex-1 rounded-full border border-[#111111]/15 bg-white px-4 py-2 text-xs font-semibold text-[#111111] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            ไม่ยืนยัน
+                          </button>
+                          <button
+                            type="button"
+                            disabled={alreadyConfirmedByViewer || confirmingId === member.user_id}
+                            onClick={() => void confirmWork(member.user_id, "confirm")}
+                            className="flex-1 rounded-full bg-[#AFFF00] px-4 py-2 text-xs font-semibold text-[#121212] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {alreadyConfirmedByViewer ? "ยืนยันแล้ว" : confirmingId === member.user_id ? "กำลังส่ง..." : "ยืนยันงานนี้"}
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
