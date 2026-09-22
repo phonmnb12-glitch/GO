@@ -5,7 +5,15 @@ import { supabase } from "@/lib/supabase"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 
-const toInputValue = (date: Date) => date.toISOString().slice(0, 16)
+// toISOString() always returns UTC, but a datetime-local input reads its
+// value as plain local wall-clock time with no timezone conversion -- using
+// toISOString() directly here made every default/pre-filled time show up
+// offset by the browser's UTC difference (7 hours early for Thailand).
+// Building the string from the date's own local getters keeps it correct
+// regardless of timezone.
+const pad2 = (value: number) => String(value).padStart(2, "0")
+const toInputValue = (date: Date) =>
+  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 
 type Friend = { user_id: string; name?: string; friend_id?: string }
 
