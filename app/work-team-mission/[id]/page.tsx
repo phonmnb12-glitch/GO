@@ -223,7 +223,9 @@ export default function WorkTeamMissionDetailPage() {
                 >
                   {isSubmittingWork ? "กำลังส่ง..." : "ถ่ายรูปส่งงาน"}
                 </button>
-                <button type="button" disabled={isActing} onClick={() => void act("complete")} className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">เสร็จสิ้นภารกิจ</button>
+                {isLeader && (
+                  <button type="button" disabled={isActing} onClick={() => void act("complete")} className="rounded-full bg-[#121212] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">เสร็จสิ้นภารกิจ</button>
+                )}
               </>
             )}
           </div>
