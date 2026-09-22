@@ -521,17 +521,26 @@ export default function MissionDetail() {
             <div className="rounded-[22px] border border-dashed border-[#111111]/15 bg-[#f7f7f5] p-6 text-sm text-[#5d5d5d]">
               No members in this mission yet.
             </div>
-          ) : mission.groupMembers.map((member) => (
-            <div key={member.memberId} className="flex items-center justify-between gap-3 rounded-[22px] border border-[#111111]/5 bg-[#f7f7f5] p-4">
-              <div>
-                <div className="text-sm font-semibold text-[#111111]">{member.name}</div>
-                <div className="mt-1 text-xs text-[#6b6b6b]">{member.status}</div>
+          ) : mission.groupMembers.map((member) => {
+            const badgeClass = member.status === "Completed"
+              ? "border-green-200 bg-green-50 text-green-700"
+              : member.status === "Failed" || member.status === "Declined"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : member.status === "In Progress"
+                  ? "border-yellow-200 bg-yellow-50 text-yellow-700"
+                  : "border-[#111111]/10 bg-white text-[#111111]"
+            return (
+              <div key={member.memberId} className="flex items-center justify-between gap-3 rounded-[22px] border border-[#111111]/5 bg-[#f7f7f5] p-4">
+                <div>
+                  <div className="text-sm font-semibold text-[#111111]">{member.name}</div>
+                  <div className={`mt-1 text-xs font-medium ${badgeClass.split(" ")[2]}`}>{member.status}</div>
+                </div>
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${badgeClass}`}>
+                  {member.status}
+                </span>
               </div>
-              <span className="rounded-full border border-[#111111]/10 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#111111]">
-                {member.status}
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </section>
     )
