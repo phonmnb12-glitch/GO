@@ -57,7 +57,24 @@ export async function GET(request: Request) {
 
     if (eventError) return NextResponse.json({ error: eventError.message }, { status: 500 })
 
-    const fallbackNotifications = (eventRows ?? []).map((event) => {
+    // These event types already get a real, properly-worded row inserted
+    // into `notifications` by the RPC/route that causes them (e.g.
+    // create_work_team_mission inserts a real "Group Mission Invitation"
+    // notification for group_invitation). Generating a fallback for them
+    // too produced a second card for the same event under a generic
+    // "Mission Activity" title -- for group_invitation specifically, that
+    // second card also rendered its own Accept/Decline buttons (action is
+    // re-derived from event_type on the client), so an invitee saw what
+    // looked like two separate invitations to respond to.
+    const eventTypesWithRealNotifications = new Set([
+      "group_invitation", "member_accepted", "member_declined", "group_mission_ready",
+      "group_mission_cancelled", "group_mission_started", "member_failed",
+      "group_mission_completed", "member_completed", "work_submitted", "work_confirmed_complete",
+    ])
+
+    const fallbackNotifications = (eventRows ?? [])
+      .filter((event) => !eventTypesWithRealNotifications.has(event.event_type ?? ""))
+      .map((event) => {
       const missionName = missionNameMap.get(event.mission_id) ?? "Mission"
       const eventType = event.event_type ?? "mission_event"
       const title = eventType === "mission_created"
