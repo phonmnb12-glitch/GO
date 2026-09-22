@@ -3,17 +3,93 @@
 import { DashboardNav } from "@/components/dashboard-nav"
 import { supabase } from "@/lib/supabase"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
-// toISOString() always returns UTC, but a datetime-local input reads its
-// value as plain local wall-clock time with no timezone conversion -- using
-// toISOString() directly here made every default/pre-filled time show up
-// offset by the browser's UTC difference (7 hours early for Thailand).
-// Building the string from the date's own local getters keeps it correct
-// regardless of timezone.
 const pad2 = (value: number) => String(value).padStart(2, "0")
-const toInputValue = (date: Date) =>
-  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+const toDatePart = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+const toTimePart = (date: Date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+
+const wheelWindow = (current: number, max: number) => [current === 0 ? max : current - 1, current, current === max ? 0 : current + 1]
+
+// The browser's native datetime-local picker renders in whatever AM/PM or
+// 24h format the OS's own regional settings use, which isn't something a
+// web page can force -- so instead of a native time input, this is a fully
+// custom 24-hour hour:minute wheel (same drag/tap pattern already used for
+// Photo AI and GPS Check's own time pickers), which always displays and
+// reads the same way regardless of the visitor's OS locale.
+function TimeWheel({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [hourStr, minuteStr] = value.split(":")
+  const hour = Number(hourStr) || 0
+  const minute = Number(minuteStr) || 0
+
+  const changeTime = (part: "hour" | "minute", delta: number) => {
+    const nextHour = part === "hour" ? (hour + delta + 24) % 24 : hour
+    const nextMinute = part === "minute" ? (minute + delta + 60) % 60 : minute
+    onChange(`${pad2(nextHour)}:${pad2(nextMinute)}`)
+  }
+
+  const dragRef = useRef<{ part: "hour" | "minute"; startY: number; consumed: number; captured: boolean } | null>(null)
+  const ROW_HEIGHT = 28
+  const DRAG_THRESHOLD = 6
+
+  const handlePointerDown = (part: "hour" | "minute") => (event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = { part, startY: event.clientY, consumed: 0, captured: false }
+  }
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+    const totalDelta = event.clientY - drag.startY
+    if (!drag.captured) {
+      if (Math.abs(totalDelta) < DRAG_THRESHOLD) return
+      drag.captured = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    const steps = Math.trunc((totalDelta - drag.consumed) / ROW_HEIGHT)
+    if (steps !== 0) {
+      const stepCount = Math.abs(steps)
+      for (let i = 0; i < stepCount; i += 1) changeTime(drag.part, steps > 0 ? -1 : 1)
+      drag.consumed += steps * ROW_HEIGHT
+    }
+  }
+  const handlePointerUp = () => { dragRef.current = null }
+
+  return (
+    <div
+      className="mt-2 flex h-[92px] items-center justify-center gap-3 rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-3 py-1"
+      onWheel={(event) => { event.preventDefault(); changeTime(event.deltaY > 0 ? "minute" : "hour", event.deltaY > 0 ? 1 : -1) }}
+    >
+      <div
+        className="flex touch-none select-none flex-col items-center leading-none"
+        onWheel={(event) => { event.stopPropagation(); changeTime("hour", event.deltaY > 0 ? 1 : -1) }}
+        onPointerDown={handlePointerDown("hour")}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        {wheelWindow(hour, 23).map((h, index) => (
+          <button key={`${h}-${index}`} type="button" onClick={() => onChange(`${pad2(h)}:${pad2(minute)}`)} className={`flex h-7 w-10 items-center justify-center text-base transition-all ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>
+            {pad2(h)}
+          </button>
+        ))}
+      </div>
+      <span className="text-base font-bold text-[#121212]">:</span>
+      <div
+        className="flex touch-none select-none flex-col items-center leading-none"
+        onWheel={(event) => { event.stopPropagation(); changeTime("minute", event.deltaY > 0 ? 1 : -1) }}
+        onPointerDown={handlePointerDown("minute")}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        {wheelWindow(minute, 59).map((m, index) => (
+          <button key={`${m}-${index}`} type="button" onClick={() => onChange(`${pad2(hour)}:${pad2(m)}`)} className={`flex h-7 w-10 items-center justify-center text-base transition-all ${index === 1 ? "scale-105 font-bold text-[#121212]" : "text-gray-300"}`}>
+            {pad2(m)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 type Friend = { user_id: string; name?: string; friend_id?: string }
 
@@ -24,8 +100,12 @@ export default function WorkTeamMissionPage() {
   const [missionName, setMissionName] = useState("")
   const [description, setDescription] = useState("")
   const [category, setCategory] = useState("")
-  const [startTime, setStartTime] = useState(toInputValue(new Date(Date.now() + 60 * 60 * 1000)))
-  const [endTime, setEndTime] = useState(toInputValue(new Date(Date.now() + 2 * 60 * 60 * 1000)))
+  const [startDate, setStartDate] = useState(toDatePart(new Date(Date.now() + 60 * 60 * 1000)))
+  const [startTimeStr, setStartTimeStr] = useState(toTimePart(new Date(Date.now() + 60 * 60 * 1000)))
+  const [endDate, setEndDate] = useState(toDatePart(new Date(Date.now() + 2 * 60 * 60 * 1000)))
+  const [endTimeStr, setEndTimeStr] = useState(toTimePart(new Date(Date.now() + 2 * 60 * 60 * 1000)))
+  const startTime = `${startDate}T${startTimeStr}`
+  const endTime = `${endDate}T${endTimeStr}`
   const [pledgeAmount, setPledgeAmount] = useState("10")
   const [errorMessage, setErrorMessage] = useState("")
   const [isLoading, setIsLoading] = useState(true)
@@ -102,8 +182,16 @@ export default function WorkTeamMissionPage() {
             <label className="text-sm font-semibold text-[#121212]">ชื่อภารกิจ<input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" placeholder="ความท้าทายของทีม" /></label>
             <label className="text-sm font-semibold text-[#121212]">ชื่อวิชา หรือ งานนั้นๆ<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="เช่น คณิตศาสตร์, โปรเจคจบ" className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" /></label>
             <label className="text-sm font-semibold text-[#121212] md:col-span-2">คำอธิบายภารกิจ<textarea value={description} onChange={(event) => setDescription(event.target.value)} className="mt-2 min-h-24 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" placeholder="ทีมจะทำอะไรบ้าง?" /></label>
-            <label className="text-sm font-semibold text-[#121212]">เวลาเริ่ม<input type="datetime-local" value={startTime} min={toInputValue(new Date())} onChange={(event) => setStartTime(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" /></label>
-            <label className="text-sm font-semibold text-[#121212]">เวลาสิ้นสุด<input type="datetime-local" value={endTime} onChange={(event) => setEndTime(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" /></label>
+            <div>
+              <p className="text-sm font-semibold text-[#121212]">เวลาเริ่ม</p>
+              <input type="date" value={startDate} min={toDatePart(new Date())} onChange={(event) => setStartDate(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" />
+              <TimeWheel value={startTimeStr} onChange={setStartTimeStr} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[#121212]">เวลาสิ้นสุด</p>
+              <input type="date" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" />
+              <TimeWheel value={endTimeStr} onChange={setEndTimeStr} />
+            </div>
             <label className="text-sm font-semibold text-[#121212]">เงินมัดจำต่อคน<input type="number" min="0" value={pledgeAmount} onChange={(event) => setPledgeAmount(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#121212]/10 bg-[#f9f9f8] px-4 py-3 font-normal outline-none focus:border-[#AFFF00]" /></label>
           </div>
 
